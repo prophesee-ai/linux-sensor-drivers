@@ -509,9 +509,42 @@ done_endpoint_free:
 	return ret;
 }
 
+#ifdef CONFIG_VIDEO_ADV_DEBUG
+static int imx636_g_register(struct v4l2_subdev *sd, struct v4l2_dbg_register *reg)
+{
+	struct imx636 *imx636 = to_imx636(sd);
+	u32 val;
+	int ret;
+
+	if (reg->size && reg->size != 4)
+		return -EINVAL;
+
+	ret = imx636_read_reg(imx636, (u32)reg->reg, 1, &val);
+	reg->val = val;
+	return ret;
+}
+
+static int imx636_s_register(struct v4l2_subdev *sd, const struct v4l2_dbg_register *reg)
+{
+	struct imx636 *imx636 = to_imx636(sd);
+
+	if (reg->size && reg->size != 4)
+		return -EINVAL;
+
+	return imx636_write_reg(imx636, (u32)reg->reg, (u32)reg->val);
+}
+#endif /* def CONFIG_VIDEO_ADV_DEBUG */
+
 /* V4l2 subdevice ops */
 static const struct v4l2_subdev_video_ops imx636_video_ops = {
 	.s_stream = imx636_set_stream,
+};
+
+static const struct v4l2_subdev_core_ops imx636_core_ops = {
+#ifdef CONFIG_VIDEO_ADV_DEBUG
+	.g_register = imx636_g_register,
+	.s_register = imx636_s_register,
+#endif
 };
 
 static const struct v4l2_subdev_pad_ops imx636_pad_ops = {
@@ -525,6 +558,7 @@ static const struct v4l2_subdev_pad_ops imx636_pad_ops = {
 static const struct v4l2_subdev_ops imx636_subdev_ops = {
 	.video = &imx636_video_ops,
 	.pad = &imx636_pad_ops,
+	.core = &imx636_core_ops,
 };
 
 /**
