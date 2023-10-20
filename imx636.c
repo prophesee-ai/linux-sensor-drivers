@@ -24,15 +24,36 @@
 #define IMX636_NUM_DATA_LANES 2
 #define IMX636_INCLK_RATE 20000000
 
+/* to avoid return value check on each register access */
+#define RET_ON(operation) do { int r = (operation); if (unlikely(r != 0)) return r; } while (0)
+
 /*
  * Sensor registers
  */
+
+#define IMX636_ROI_CTRL 0x04
+#define IMX636_ROI_PX_TD_RSTN BIT(10)
 
 #define IMX636_CHIP_ID 0x14
 #define IMX636_ID 0xA0401806
 
 #define IMX636_STANDBY_CTRL 0xC8
 #define IMX636_STANDBY_VALUE 0x101
+
+/* RO registers */
+#define RO_BASE 0x9000
+
+#define IMX636_RO_TIME_BASE_CTRL (RO_BASE + 0x008)
+#define IMX636_RO_TIME_BASE_ENABLE BIT(0)
+
+#define IMX636_RO_LP_CTRL (RO_BASE + 0x028)
+#define IMX636_LP_OUTPUT_DISABLE BIT(1)
+
+/* MIPI_CSI registers */
+#define MIPI_CSI_BASE 0xB000
+
+#define IMX636_MIPI_CONTROL (MIPI_CSI_BASE + 0x000)
+#define IMX636_MIPI_CSI_ENABLE BIT(0)
 
 /* MBX registers */
 #define MBX_BASE 0x400000
@@ -164,6 +185,53 @@ static int imx636_write_reg(struct imx636 *imx636, u32 reg, const u32 val)
 	}
 
 	return ret;
+}
+
+/**
+ * imx636_set_bitfield() - Set bits in a register to a given value
+ * @imx636: pointer to imx636 device
+ * @reg: register address
+ * @field: bits to set
+ * @val: value of the bits to fill, already shifted to match register layout
+ *
+ * Return: 0 if successful, error code otherwise.
+ */
+static int imx636_set_bitfield(struct imx636 *imx636, const u32 reg, const u32 field, const u32 val)
+{
+	u32 value, ret;
+
+	ret = imx636_read_reg(imx636, reg, 1, &value);
+	if (ret)
+		return ret;
+	value &= ~field;
+	value |= val & field;
+	return imx636_write_reg(imx636, reg, value);
+}
+
+/**
+ * imx636_set_reg() - Set bits in a register
+ * @imx636: pointer to imx636 device
+ * @reg: register address
+ * @bits: bits to set
+ *
+ * Return: 0 if successful, error code otherwise.
+ */
+static int imx636_set_reg(struct imx636 *imx636, u32 reg, const u32 bits)
+{
+	return imx636_set_bitfield(imx636, reg, bits, ~0);
+}
+
+/**
+ * imx636_write_reg() - Clear bits in a register
+ * @imx636: pointer to imx636 device
+ * @reg: register address
+ * @bits: bits to clear
+ *
+ * Return: 0 if successful, error code otherwise.
+ */
+static int imx636_clear_reg(struct imx636 *imx636, u32 reg, const u32 bits)
+{
+	return imx636_set_bitfield(imx636, reg, bits, 0);
 }
 
 /**
@@ -322,6 +390,14 @@ static int imx636_init_pad_cfg(struct v4l2_subdev *sd,
  */
 static int imx636_start_streaming(struct imx636 *imx636)
 {
+	/* MIPI CSI-2 enable */
+	RET_ON(imx636_set_reg(imx636, IMX636_MIPI_CONTROL, IMX636_MIPI_CSI_ENABLE));
+	/* Pixel reset release */
+	RET_ON(imx636_set_reg(imx636, IMX636_ROI_CTRL, IMX636_ROI_PX_TD_RSTN));
+	/* Timer base enable */
+	RET_ON(imx636_set_reg(imx636, IMX636_RO_TIME_BASE_CTRL, IMX636_RO_TIME_BASE_ENABLE));
+	/* Digital data enable (only needed when resuming after suspend) */
+	RET_ON(imx636_clear_reg(imx636, IMX636_RO_LP_CTRL, IMX636_LP_OUTPUT_DISABLE));
 	return 0;
 }
 
@@ -333,6 +409,17 @@ static int imx636_start_streaming(struct imx636 *imx636)
  */
 static int imx636_stop_streaming(struct imx636 *imx636)
 {
+	/* Skipping other accesses if one fail may not be the best policy, but overall,
+	 * if we can't do register accesses, we're doomed, one way or another
+	 */
+	/* Digital data disable */
+	RET_ON(imx636_set_reg(imx636, IMX636_RO_LP_CTRL, IMX636_LP_OUTPUT_DISABLE));
+	/* Timer base disable */
+	RET_ON(imx636_clear_reg(imx636, IMX636_RO_TIME_BASE_CTRL, IMX636_RO_TIME_BASE_ENABLE));
+	/* Pixel reset release */
+	RET_ON(imx636_clear_reg(imx636, IMX636_ROI_CTRL, IMX636_ROI_PX_TD_RSTN));
+	/* MIPI CSI-2 disable */
+	RET_ON(imx636_clear_reg(imx636, IMX636_MIPI_CONTROL, IMX636_MIPI_CSI_ENABLE));
 	return 0;
 }
 
