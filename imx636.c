@@ -16,6 +16,7 @@
 #include <media/v4l2-ctrls.h>
 #include <media/v4l2-fwnode.h>
 #include <media/v4l2-subdev.h>
+#include "psee-format.h"
 
 #define IMX636_PIXEL_ARRAY_WIDTH 1280U
 #define IMX636_PIXEL_ARRAY_HEIGHT 720U
