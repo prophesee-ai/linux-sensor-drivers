@@ -1,0 +1,102 @@
+# SPDX-License-Identifier: (GPL-2.0-only OR BSD-2-Clause)
+# Copyright (C) 2023 Prophesee
+%YAML 1.2
+---
+$id: http://devicetree.org/schemas/media/i2c/sony,imx636.yaml#
+$schema: http://devicetree.org/meta-schemas/core.yaml#
+
+title: Sony IMX636 Sensor
+
+maintainers:
+  - Christian Dreher <cdreher@prophesee.ai>
+
+description:
+  The IMX636 is a diagonal 7.1 mm (Type 1/2.5) approx. 0.92 M effective
+  pixels (1280H x 720V) event-based vision sensor.
+  It is programmable through I2C interface.
+  Image data is sent through MIPI CSI-2.
+
+properties:
+  compatible:
+    enum:
+      - sony,imx636
+  reg:
+    description: I2C address
+    maxItems: 1
+
+  assigned-clocks: true
+  assigned-clock-parents: true
+  assigned-clock-rates: true
+
+  clocks:
+    description: Input clock
+    maxItems: 1
+
+  vadd-supply:
+    description: Supply voltage (Analog)
+
+  vddd1-supply:
+    description: Supply voltage (Digital 1)
+
+  vddd2-supply:
+    description: Supply voltage (Digital 2)
+
+  nreset-gpio:
+    description: Reference to the GPIO connected to the RSTn pin, if any.
+    maxItems: 1
+
+  xclr-gpio:
+    description: Reference to the GPIO connected to the XCLR pin, if any.
+    maxItems: 1
+
+  port:
+    description: MIPI CSI-2 transmitter port
+    $ref: /schemas/graph.yaml#/$defs/port-base
+    additionalProperties: false
+
+    properties:
+      endpoint:
+        $ref: /schemas/media/video-interfaces.yaml#
+        unevaluatedProperties: false
+
+        properties:
+          data-lanes:
+            minItems: 1
+            maxItems: 2
+
+        required:
+          - data-lanes
+
+required:
+  - compatible
+  - reg
+  - clocks
+  - port
+
+additionalProperties: false
+
+examples:
+  - |
+    i2c0 {
+        #address-cells = <1>;
+        #size-cells = <0>;
+
+        camera@3c {
+            compatible = "sony,imx636";
+            reg = <0x3c>;
+            clocks = <&imx636_clk>;
+
+            assigned-clocks = <&imx636_clk>;
+            assigned-clock-parents = <&imx636_clk_parent>;
+            assigned-clock-rates = <20000000>;
+
+            port {
+                imx636: endpoint {
+                    remote-endpoint = <&csirx>;
+                    data-lanes = <1 2>;
+                    link-frequencies = /bits/ 64 <1500000000>;
+                };
+            };
+        };
+    };
+...
