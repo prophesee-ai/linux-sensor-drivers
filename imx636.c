@@ -6,6 +6,7 @@
  */
 #include <asm/unaligned.h>
 
+#include <linux/kconfig.h> /* to detect big-endian builds */
 #include <linux/clk.h>
 #include <linux/delay.h>
 #include <linux/i2c.h>
@@ -39,6 +40,22 @@
 
 #define IMX636_STANDBY_CTRL 0xC8
 #define IMX636_STANDBY_VALUE 0x101
+
+/* EDF registers */
+#define EDF_BASE 0x7000
+
+#define IMX636_EDF_PIPELINE_CONTROL (EDF_BASE + 0x000)
+#define IMX636_EDF_PIPELINE_EVT3 (0x00070001)
+#define IMX636_EDF_PIPELINE_EVT21 (0x00070003)
+
+/* EOI registers */
+#define EOI_BASE 0x8000
+
+#define IMX636_EOI_PIPELINE_CONTROL (EOI_BASE + 0x000)
+#define IMX636_EOI_BYTE_ORDER_MASK 0xC0
+#define IMX636_EOI_BYTE_ORDER_32LE 0x00
+#define IMX636_EOI_BYTE_ORDER_16LE 0x80
+#define IMX636_EOI_BYTE_ORDER_32BE 0xC0
 
 /* RO registers */
 #define RO_BASE 0x9000
@@ -104,6 +121,7 @@ static const s64 link_freq[] = {
 /* Supported sensor media formats */
 static const u32 supported_formats[] = {
 	MEDIA_BUS_FMT_PSEE_EVT3,
+	MEDIA_BUS_FMT_PSEE_EVT21,
 };
 
 
@@ -343,10 +361,15 @@ static int imx636_set_pad_format(struct v4l2_subdev *sd,
 	struct imx636 *imx636 = to_imx636(sd);
 	u32 code;
 	int ret = 0;
+	int i;
 
 	mutex_lock(&imx636->mutex);
 
 	code = supported_formats[0];
+	for (i = 0; i < ARRAY_SIZE(supported_formats); i++) {
+		if (supported_formats[i] == fmt->format.code)
+			code = supported_formats[i];
+	}
 	imx636_fill_pad_format(imx636, code, fmt);
 
 	if (fmt->which == V4L2_SUBDEV_FORMAT_TRY) {
@@ -380,6 +403,55 @@ static int imx636_init_pad_cfg(struct v4l2_subdev *sd,
 	imx636_fill_pad_format(imx636, supported_formats[0], &fmt);
 
 	return imx636_set_pad_format(sd, sd_state, &fmt);
+}
+
+/**
+ * imx636_apply_format() - Set the sensor to output the selected format
+ * @imx636: pointer to imx636 device
+ *
+ * Return: 0 if successful, error code otherwise.
+ */
+static int imx636_apply_format(struct imx636 *imx636)
+{
+	int ret;
+	u32 eoi_value;
+	u32 byte_order;
+
+	/* From CSI-2 point of view, the data is always "User Defined 8-bit Data Type 1",
+	 * (cf Section 11.5 of CSI-2 Specification).
+	 * To ease the decoding, the sensor reorders multi-byte data to match receiver
+	 * byte-ordering.
+	 */
+	ret = imx636_read_reg(imx636, IMX636_EOI_PIPELINE_CONTROL, 1, &eoi_value);
+	if (ret)
+		return ret;
+
+	switch (imx636->format_code) {
+	case MEDIA_BUS_FMT_PSEE_EVT21:
+		byte_order = IMX636_EOI_BYTE_ORDER_32LE;
+		ret = imx636_write_reg(imx636, IMX636_EDF_PIPELINE_CONTROL,
+			IMX636_EDF_PIPELINE_EVT21);
+		if (ret)
+			return ret;
+		break;
+	case MEDIA_BUS_FMT_PSEE_EVT3:
+		byte_order = IMX636_EOI_BYTE_ORDER_16LE;
+		ret = imx636_write_reg(imx636, IMX636_EDF_PIPELINE_CONTROL,
+			IMX636_EDF_PIPELINE_EVT3);
+		if (ret)
+			return ret;
+		break;
+	default:
+		return -EINVAL;
+	}
+
+	eoi_value &= ~IMX636_EOI_BYTE_ORDER_MASK;
+#ifdef __BIG_ENDIAN
+	/* On Big-endian architectures, no reordering should be necessary */
+	byte_order = IMX636_EOI_BYTE_ORDER_32BE;
+#endif
+	eoi_value |= byte_order;
+	return imx636_write_reg(imx636, IMX636_EOI_PIPELINE_CONTROL, eoi_value);
 }
 
 /**
@@ -446,6 +518,10 @@ static int imx636_set_stream(struct v4l2_subdev *sd, int enable)
 		ret = pm_runtime_resume_and_get(imx636->dev);
 		if (ret)
 			goto error_unlock;
+
+		ret = imx636_apply_format(imx636);
+		if (ret)
+			goto error_power_off;
 
 		ret = imx636_start_streaming(imx636);
 		if (ret)
