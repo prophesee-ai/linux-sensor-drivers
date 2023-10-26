@@ -31,12 +31,25 @@
 /*
  * Sensor registers
  */
+#define IMX636_GLOBAL_CTRL 0x00
+#define IMX636_SYS_CLK_SWITCH_SEL BIT(3)
+#define IMX636_SYS_CLK_EN BIT(30)
 
 #define IMX636_ROI_CTRL 0x04
 #define IMX636_ROI_PX_TD_RSTN BIT(10)
 
 #define IMX636_CHIP_ID 0x14
 #define IMX636_ID 0xA0401806
+
+#define IMX636_DV_CTRL 0xB8
+#define IMX636_DV_PC_CLKDIVEN BIT(0)
+#define IMX636_DV_PC_SYSCLKEN BIT(3)
+
+#define IMX636_GLOBAL_CTRL2 0xC0
+#define IMX636_DVTOP_DIVIDER_MASK (0xFF)
+#define IMX636_DVTOP_DIVIDER(div) ((div) & IMX636_DVTOP_DIVIDER_MASK)
+#define IMX636_SYS_CLK_DIVIDER_NEW_MASK (0x700)
+#define IMX636_SYS_CLK_DIVIDER_NEW(div) (((div) << 8) & IMX636_SYS_CLK_DIVIDER_NEW_MASK)
 
 #define IMX636_STANDBY_CTRL 0xC8
 #define IMX636_STANDBY_VALUE 0x101
@@ -72,6 +85,57 @@
 #define IMX636_MIPI_CONTROL (MIPI_CSI_BASE + 0x000)
 #define IMX636_MIPI_CSI_ENABLE BIT(0)
 
+#define IMX636_MIPI_ESCAPE_CTRL (MIPI_CSI_BASE + 0x004)
+#define IMX636_MIPI_ESCAPE_CLK_EN BIT(7)
+
+#define IMX636_MIPI_PL_RG_1 (MIPI_CSI_BASE + 0x064)
+#define IMX636_MIPI_PL_RG_CKOUTEN BIT(1)
+
+#define IMX636_MIPI_PL_RG_2 (MIPI_CSI_BASE + 0x068)
+#define IMX636_MIPI_PL_RG_ENDET_OP BIT(2)
+
+#define IMX636_MIPI_PL_RG_5 (MIPI_CSI_BASE + 0x074)
+
+#define IMX636_MIPI_PL_RG_6 (MIPI_CSI_BASE + 0x078)
+
+#define IMX636_MIPI_PL_RG_7 (MIPI_CSI_BASE + 0x07C)
+#define IMX636_MIPI_PL_XCLR_LV BIT(0)
+#define IMX636_MIPI_PL_XSTB_OP BIT(1)
+#define IMX636_MIPI_PL_CLK_LOCKDET_OP BIT(2)
+
+#define IMX636_MIPI_POWER (MIPI_CSI_BASE + 0x040)
+#define IMX636_MIPI_POWER_RST_W BIT(0) /* async nrst */
+#define IMX636_MIPI_POWER_XCLR_LV BIT(1)
+#define IMX636_MIPI_POWER_XCLR_MV BIT(2)
+#define IMX636_MIPI_POWER_BCIF_EN BIT(3)
+
+#define IMX636_MIPI_STREAM (MIPI_CSI_BASE + 0x044)
+
+#define IMX636_MIPI_TCLKPOST (MIPI_CSI_BASE + 0x080)
+#define IMX636_MIPI_TCLKPRE (MIPI_CSI_BASE + 0x084)
+#define IMX636_MIPI_TCLKPREPARE (MIPI_CSI_BASE + 0x088)
+#define IMX636_MIPI_TCLKTRAIL (MIPI_CSI_BASE + 0x08C)
+#define IMX636_MIPI_TCLKZERO (MIPI_CSI_BASE + 0x090)
+#define IMX636_MIPI_THSEXIT (MIPI_CSI_BASE + 0x094)
+#define IMX636_MIPI_THSPREPARE (MIPI_CSI_BASE + 0x098)
+#define IMX636_MIPI_THSZERO (MIPI_CSI_BASE + 0x09C)
+#define IMX636_MIPI_THSTRAIL (MIPI_CSI_BASE + 0x0A0)
+#define IMX636_MIPI_TLPX (MIPI_CSI_BASE + 0x0A4)
+#define IMX636_MIPI_TXCLKESC_FREQ (MIPI_CSI_BASE + 0x0AC)
+
+#define IMX636_MIPI_DPHY_POWER (MIPI_CSI_BASE + 0x0C8)
+#define IMX636_MIPI_RG_BIASEN BIT(0)
+#define IMX636_MIPI_RG_LPREGEN BIT(1)
+
+#define IMX636_MIPI_DPHY_PLL_DIV (MIPI_CSI_BASE + 0x0CC)
+
+#define IMX636_MIPI_BYTECLK_CTRL (MIPI_CSI_BASE + 0x120)
+
+/* SLVS registers */
+#define MIPI_SLVS_BASE 0xE000
+
+#define IMX636_MIPI_SLVS_LINKCLK_CTRL (MIPI_SLVS_BASE + 0x120)
+
 /* MBX registers */
 #define MBX_BASE 0x400000
 
@@ -82,6 +146,51 @@ static const char * const imx636_supply_names[] = {
 	"vadd",		/* Supply voltage (Analog) */
 	"vddd1",	/* Supply voltage (Digital 1) */
 	"vddd2",	/* Supply voltage (Digital 2) */
+};
+
+/* For now, the 4 available configs are pre-computed */
+static const struct link_timing {
+	s64 line_freq;
+	u32 pll_fb_div_d;
+	u32 dvtop_div_d;
+	u32 sys_clk_div_d;
+	u16 tclkpost;
+	u16 tclkpre;
+	u16 tclkprepare;
+	u16 tclktrail;
+	u16 tclkzero;
+	u16 thsexit;
+	u16 thsprepare;
+	u16 thszero;
+	u16 thstrail;
+	u16 tlpx;
+	u16 txclkesc_freq;
+	u8 dphy_clk_div;
+} link_timings[] = {
+	{ .line_freq = 1500000000, .dphy_clk_div = 0,
+	 .pll_fb_div_d = 150, .dvtop_div_d = 0x20, .sys_clk_div_d = 1,
+	 .tclkpost = 167, .tclkpre = 15, .tclkprepare = 87, .tclktrail = 95, .tclkzero = 407,
+	 .thsexit = 159, .thsprepare = 95, .thszero = 175, .thstrail = 95, .tlpx = 79,
+	 .txclkesc_freq = 40,
+	},
+	{ .line_freq = 1200000000, .dphy_clk_div = 0,
+	 .pll_fb_div_d = 120, .dvtop_div_d = 0x08, .sys_clk_div_d = 2,
+	 .tclkpost = 151, .tclkpre = 15, .tclkprepare = 79, .tclktrail = 79, .tclkzero = 335,
+	 .thsexit = 135, .thsprepare = 79, .thszero = 151, .thstrail = 79, .tlpx = 63,
+	 .txclkesc_freq = 40,
+	},
+	{ .line_freq = 800000000, .dphy_clk_div = 1,
+	 .pll_fb_div_d = 160, .dvtop_div_d = 0x10, .sys_clk_div_d = 2,
+	 .tclkpost = 119, .tclkpre = 15, .tclkprepare = 55, .tclktrail = 55, .tclkzero = 223,
+	 .thsexit = 87, .thsprepare = 55, .thszero = 103, .thstrail = 55, .tlpx = 47,
+	 .txclkesc_freq = 40,
+	},
+	{ .line_freq = 600000000, .dphy_clk_div = 1,
+	 .pll_fb_div_d = 120, .dvtop_div_d = 0x08, .sys_clk_div_d = 2,
+	 .tclkpost = 103, .tclkpre = 15, .tclkprepare = 39, .tclktrail = 39, .tclkzero = 183,
+	 .thsexit = 71, .thsprepare = 47, .thszero = 79, .thstrail = 47, .tlpx = 39,
+	 .txclkesc_freq = 40,
+	},
 };
 
 /**
@@ -95,7 +204,7 @@ static const char * const imx636_supply_names[] = {
  * @inclk: Sensor input clock
  * @supplies: Regulator supplies
  * @mutex: Mutex for serializing sensor controls
- * @link_freq: frequency of the CSI-2 clock lane
+ * @link_timing: Pointer to pre-computed timing for the CSI-2 link
  * @format_code: Media-ctl code of the output format
  * @streaming: Flag indicating streaming state
  */
@@ -109,13 +218,9 @@ struct imx636 {
 	struct clk *inclk;
 	struct regulator_bulk_data supplies[ARRAY_SIZE(imx636_supply_names)];
 	struct mutex mutex;
-	s64 link_freq;
+	const struct link_timing *timings;
 	u32 format_code;
 	bool streaming;
-};
-
-static const s64 link_freq[] = {
-	1500000000,
 };
 
 /* Supported sensor media formats */
@@ -455,6 +560,104 @@ static int imx636_apply_format(struct imx636 *imx636)
 }
 
 /**
+ * imx636_reconfigure_csi2_freq() - Reconfigure the clock tree for the selected CSI-2 freq
+ * @imx636: pointer to imx636 device
+ *
+ * Return: 0 if successful, error code otherwise.
+ */
+static int imx636_reconfigure_csi2_freq(struct imx636 *imx636)
+{
+	/* The sensor starts with lanes at 1.5Gbps, which provides top performances, but some
+	 * hardware may require to lower this frequency to preserve data integrity.
+	 */
+	int i;
+
+	/* Disable MIPI CSI-2 */
+	RET_ON(imx636_clear_reg(imx636, IMX636_MIPI_CONTROL, IMX636_MIPI_CSI_ENABLE));
+
+	/* Power down CSI-2 and D-PHY */
+	RET_ON(imx636_write_reg(imx636, IMX636_MIPI_STREAM, 0));
+	RET_ON(imx636_clear_reg(imx636, IMX636_MIPI_ESCAPE_CTRL, IMX636_MIPI_ESCAPE_CLK_EN));
+	RET_ON(imx636_clear_reg(imx636, IMX636_MIPI_POWER, IMX636_MIPI_POWER_RST_W));
+	RET_ON(imx636_write_reg(imx636, IMX636_MIPI_DPHY_POWER, 0));
+	RET_ON(imx636_clear_reg(imx636, IMX636_MIPI_POWER, IMX636_MIPI_POWER_XCLR_LV));
+	RET_ON(imx636_clear_reg(imx636, IMX636_MIPI_POWER, IMX636_MIPI_POWER_BCIF_EN));
+
+	/* Power down PLL */
+	RET_ON(imx636_clear_reg(imx636, IMX636_GLOBAL_CTRL, IMX636_SYS_CLK_SWITCH_SEL));
+	RET_ON(imx636_clear_reg(imx636, IMX636_GLOBAL_CTRL, IMX636_SYS_CLK_EN));
+	RET_ON(imx636_clear_reg(imx636, IMX636_DV_CTRL, IMX636_DV_PC_SYSCLKEN));
+	RET_ON(imx636_clear_reg(imx636, IMX636_DV_CTRL, IMX636_DV_PC_CLKDIVEN));
+	RET_ON(imx636_clear_reg(imx636, IMX636_MIPI_PL_RG_7,
+		IMX636_MIPI_PL_XCLR_LV | IMX636_MIPI_PL_XSTB_OP));
+
+	/* reconfigure the PLL */
+	RET_ON(imx636_write_reg(imx636, IMX636_MIPI_PL_RG_5, 2 /* Input divider */));
+	RET_ON(imx636_write_reg(imx636, IMX636_MIPI_PL_RG_6, imx636->timings->pll_fb_div_d));
+	RET_ON(imx636_write_reg(imx636, IMX636_GLOBAL_CTRL2,
+		IMX636_DVTOP_DIVIDER(imx636->timings->dvtop_div_d) |
+		IMX636_SYS_CLK_DIVIDER_NEW(imx636->timings->sys_clk_div_d)));
+
+	/* Power up PLL */
+	RET_ON(imx636_write_reg(imx636, IMX636_MIPI_BYTECLK_CTRL, 1));
+	RET_ON(imx636_write_reg(imx636, IMX636_MIPI_SLVS_LINKCLK_CTRL, 0));
+	RET_ON(imx636_set_reg(imx636, IMX636_MIPI_PL_RG_2, IMX636_MIPI_PL_RG_ENDET_OP));
+	RET_ON(imx636_set_reg(imx636, IMX636_MIPI_PL_RG_7, IMX636_MIPI_PL_XCLR_LV));
+	RET_ON(imx636_set_reg(imx636, IMX636_MIPI_PL_RG_7, IMX636_MIPI_PL_XSTB_OP));
+
+	/* At 1MHz, a register read takes more that 50us, the PLL should lock in 200us */
+	for (i = 0; i < 10; i++) {
+		u32 reg;
+
+		RET_ON(imx636_read_reg(imx636, IMX636_MIPI_PL_RG_7, 1, &reg));
+		if (reg & IMX636_MIPI_PL_CLK_LOCKDET_OP)
+			break;
+	}
+	if (i == 10) {
+		dev_err(imx636->dev, "Could not lock PLL");
+		return -EIO;
+	}
+	RET_ON(imx636_set_reg(imx636, IMX636_DV_CTRL, IMX636_DV_PC_CLKDIVEN));
+	RET_ON(imx636_set_reg(imx636, IMX636_DV_CTRL, IMX636_DV_PC_SYSCLKEN));
+	RET_ON(imx636_set_reg(imx636, IMX636_GLOBAL_CTRL, IMX636_SYS_CLK_EN));
+	RET_ON(imx636_set_reg(imx636, IMX636_GLOBAL_CTRL, IMX636_SYS_CLK_SWITCH_SEL));
+
+	/* Update the D-PHY timings for the new clock configuration */
+	RET_ON(imx636_write_reg(imx636, IMX636_MIPI_TCLKPOST, imx636->timings->tclkpost));
+	RET_ON(imx636_write_reg(imx636, IMX636_MIPI_TCLKPRE, imx636->timings->tclkpre));
+	RET_ON(imx636_write_reg(imx636, IMX636_MIPI_TCLKPREPARE, imx636->timings->tclkprepare));
+	RET_ON(imx636_write_reg(imx636, IMX636_MIPI_TCLKTRAIL, imx636->timings->tclktrail));
+	RET_ON(imx636_write_reg(imx636, IMX636_MIPI_TCLKZERO, imx636->timings->tclkzero));
+	RET_ON(imx636_write_reg(imx636, IMX636_MIPI_THSEXIT, imx636->timings->thsexit));
+	RET_ON(imx636_write_reg(imx636, IMX636_MIPI_THSPREPARE, imx636->timings->thsprepare));
+	RET_ON(imx636_write_reg(imx636, IMX636_MIPI_THSZERO, imx636->timings->thszero));
+	RET_ON(imx636_write_reg(imx636, IMX636_MIPI_THSTRAIL, imx636->timings->thstrail));
+	RET_ON(imx636_write_reg(imx636, IMX636_MIPI_TLPX, imx636->timings->tlpx));
+	RET_ON(imx636_write_reg(imx636, IMX636_MIPI_TXCLKESC_FREQ, imx636->timings->txclkesc_freq));
+	RET_ON(imx636_write_reg(imx636, IMX636_MIPI_DPHY_PLL_DIV, imx636->timings->dphy_clk_div));
+
+	/* Power up D-PHY */
+	/* The LDOs are still up, no need to re-enable them */
+	/* Re-enable power, except reference bias current */
+	RET_ON(imx636_write_reg(imx636, IMX636_MIPI_POWER,
+		IMX636_MIPI_POWER_RST_W | IMX636_MIPI_POWER_XCLR_LV | IMX636_MIPI_POWER_XCLR_MV));
+	RET_ON(imx636_set_reg(imx636, IMX636_MIPI_PL_RG_1, IMX636_MIPI_PL_RG_CKOUTEN));
+	RET_ON(imx636_set_reg(imx636, IMX636_MIPI_POWER, IMX636_MIPI_POWER_BCIF_EN));
+	usleep_range(100, 200);
+	RET_ON(imx636_set_reg(imx636, IMX636_MIPI_ESCAPE_CTRL, IMX636_MIPI_ESCAPE_CLK_EN));
+	usleep_range(200, 300);
+	RET_ON(imx636_write_reg(imx636, IMX636_MIPI_DPHY_POWER,
+		IMX636_MIPI_RG_BIASEN | IMX636_MIPI_RG_LPREGEN));
+	usleep_range(200, 300);
+
+	/* Re-enable stream and control */
+	RET_ON(imx636_write_reg(imx636, IMX636_MIPI_STREAM, 1));
+	RET_ON(imx636_set_reg(imx636, IMX636_MIPI_CONTROL, IMX636_MIPI_CSI_ENABLE));
+
+	return 0;
+}
+
+/**
  * imx636_start_streaming() - Start sensor stream
  * @imx636: pointer to imx636 device
  *
@@ -518,6 +721,10 @@ static int imx636_set_stream(struct v4l2_subdev *sd, int enable)
 		ret = pm_runtime_resume_and_get(imx636->dev);
 		if (ret)
 			goto error_unlock;
+
+		ret = imx636_reconfigure_csi2_freq(imx636);
+		if (ret)
+			goto error_power_off;
 
 		ret = imx636_apply_format(imx636);
 		if (ret)
@@ -654,10 +861,11 @@ static int imx636_parse_hw_config(struct imx636 *imx636)
 	}
 
 	for (i = 0; i < bus_cfg.nr_of_link_frequencies; i++) {
-		for (j = 0; j < ARRAY_SIZE(link_freq); j++) {
-			if (bus_cfg.link_frequencies[i] == link_freq[j]) {
-				dev_info(imx636->dev, "Using CSI-2 freq %lld", link_freq[j]);
-				imx636->link_freq = link_freq[j];
+		for (j = 0; j < ARRAY_SIZE(link_timings); j++) {
+			if (bus_cfg.link_frequencies[i] == link_timings[j].line_freq) {
+				imx636->timings = &link_timings[j];
+				dev_info(imx636->dev, "Using CSI-2 freq %lld",
+					imx636->timings->line_freq);
 				goto done_endpoint_free;
 			}
 		}
