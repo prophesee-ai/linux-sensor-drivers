@@ -37,7 +37,6 @@
 #define IMX636_SYS_CLK_EN BIT(30)
 
 #define IMX636_ROI_CTRL 0x04
-#define IMX636_ROI_PX_TD_RSTN BIT(10)
 union roi_ctrl {
 	struct {
 		u32 unused          :1;
@@ -143,15 +142,51 @@ union bgen {
 #define RO_BASE 0x9000
 
 #define IMX636_RO_CTRL (RO_BASE + 0x000)
-#define IMX636_RO_TEST_PIXEL_MUX_EN BIT(0)
-#define IMX636_RO_TD_SELF_TEST_EN BIT(1)
-#define IMX636_RO_ANALOG_PIPE_EN BIT(3)
-#define IMX636_RO_DIGITAL_PIPE_EN BIT(9)
+union ro_ctrl {
+	/* generic description, EM bits don't exist in IMX636 silicium */
+	struct {
+		u32 ro_test_pixel_mux_en :1; /* connect test pixel to RO */
+		u32 ro_td_self_test_en   :1; /* enable TD pattern gen */
+		u32 ro_em_self_test_en   :1;
+		u32 ro_analog_pipe_en    :1; /* analog line pipelining */
+		u32 erc_self_test_en     :1; /* ERC pattern generator */
+		u32 ro_inv_pol_td        :1; /* invert TD polarity */
+		u32 ro_inv_pol_em        :1;
+		u32 ro_lp_cnt_en         :1; /* enable event counter */
+		u32 ro_lp_drop_en        :1; /* enable event dropping */
+		u32 ro_digital_pipe_en   :1; /* enable RO digital pipe */
+		u32 ro_avoid_bpress_td   :1; /* drop TD lines when busy */
+		u32 ro_avoid_bpress_em   :1;
+		u32 drop_en              :1; /* drop events at RO output */
+		u32 drop_on_full_en      :1; /* 1:when full, 0:always */
+		u32 unused18             :18;
+	};
+	u32 raw;
+};
 
 #define IMX636_RO_TIME_BASE_CTRL (RO_BASE + 0x008)
-#define IMX636_RO_TIME_BASE_ENABLE BIT(0)
+union timebase_ctrl {
+	struct {
+		u32 enable               :1; /* 0: disabled; 1: enabled */
+		u32 mode                 :1; /* 0: internal; 1: external */
+		u32 external_mode        :1; /* 0: slave; 1: master */
+		u32 external_mode_enable :1; /* enable in ext mode */
+		u32 us_counter_max       :7; /* digital clk/timebase factor */
+		u32 unused21             :21;
+	};
+	u32 raw;
+};
 
 #define IMX636_RO_LP_CTRL (RO_BASE + 0x028)
+union ro_lowpower_ctrl {
+	struct {
+		u32 counter_enable       :1; /* 1: enable event counters */
+		u32 output_disable       :1; /* 1: trash events at output */
+		u32 keep_th              :1; /* 1: don't trash TH events */
+		u32 unused29             :29;
+	};
+	u32 raw;
+};
 #define IMX636_LP_OUTPUT_DISABLE BIT(1)
 
 /* MIPI_CSI registers */
@@ -216,6 +251,18 @@ union bgen {
 
 #define IMX636_MBX_MISC (MBX_BASE + 0x010)
 #define IMX636_BOOT_MAGIC 3405691582u
+
+enum event_src {
+	PIXEL_ARRAY = 0,
+	TIMEBASE_ONLY = 1,
+	RO_PATTERN = 2,
+};
+
+static const char * const event_source_name[] = {
+	"Pixel Array",
+	"Time base",
+	"Readout Pattern",
+};
 
 static const char * const imx636_supply_names[] = {
 	"vadd",		/* Supply voltage (Analog) */
@@ -283,6 +330,7 @@ static const struct link_timing {
  * @streaming: Flag indicating streaming state
  * @initialized: Flag to know if controls may be applied
  * @ctrls: structure holding the V4L2 controls
+ * @pattern_ctrl: the control setting the pattern to stream
  * @crop: the rectangle requested as region of interest
  */
 struct imx636 {
@@ -299,6 +347,7 @@ struct imx636 {
 	bool streaming;
 	bool initialized;
 	struct v4l2_ctrl_handler ctrls;
+	struct v4l2_ctrl *pattern_ctrl;
 	struct v4l2_rect crop;
 };
 
@@ -689,7 +738,7 @@ static int imx636_set_roi_rect(struct imx636 *imx636, struct v4l2_rect *roi)
 	};
 
 	/* Keep pixels active if already streaming */
-	if (imx636->streaming)
+	if (imx636->streaming && (imx636->pattern_ctrl->val == PIXEL_ARRAY))
 		roi_ctrl.px_td_rstn = 1;
 
 	/* Enable the ROI programming */
@@ -878,12 +927,17 @@ static int imx636_reconfigure_csi2_freq(struct imx636 *imx636)
  */
 static int imx636_tune_analog(struct imx636 *imx636)
 {
+	union ro_ctrl ro_ctrl = {
+		.ro_analog_pipe_en = 0,
+		.ro_digital_pipe_en = 1,
+	};
+
 	/* Set Pixel monitor reference current control to Pmos leak */
 	/* reason is not documented */
 	RET_ON(imx636_write_reg(imx636, IMX636_SPARE_CTRL0, 0x200));
 	/* Disable analog pipeline */
 	/* Analog queueing seems to generate artifacts in some conditions */
-	RET_ON(imx636_clear_reg(imx636, IMX636_RO_CTRL, IMX636_RO_ANALOG_PIPE_EN));
+	RET_ON(imx636_write_reg(imx636, IMX636_RO_CTRL, ro_ctrl.raw));
 	return 0;
 }
 
@@ -920,39 +974,79 @@ static void imx636_deinit(struct imx636 *imx636)
  *
  * Return: 0 if successful, error code otherwise.
  */
-static int imx636_start_streaming(struct imx636 *imx636)
+static int imx636_start_streaming(struct imx636 *imx636, enum event_src src)
 {
+	union ro_ctrl ro_ctrl = { .ro_digital_pipe_en = 1, };
+	union timebase_ctrl timebase = {
+		.enable = 1,
+		.us_counter_max = 100,
+	};
+	union ro_lowpower_ctrl lp_ctrl = {
+		.output_disable = 0,
+	};
+	union roi_ctrl roi_ctrl = {
+		.roni_n_en = 1,       /* keep ROI mode */
+		.px_td_rstn = 0,      /* pixels in reset */
+		.pix_roi_slope_n = 3, /* default value */
+		.pix_roi_slope_p = 3, /* default value */
+	};
+
 	/* MIPI CSI-2 enable */
 	RET_ON(imx636_set_reg(imx636, IMX636_MIPI_CONTROL, IMX636_MIPI_CSI_ENABLE));
-	/* Pixel reset release */
-	RET_ON(imx636_set_reg(imx636, IMX636_ROI_CTRL, IMX636_ROI_PX_TD_RSTN));
-	/* Timer base enable */
-	RET_ON(imx636_set_reg(imx636, IMX636_RO_TIME_BASE_CTRL, IMX636_RO_TIME_BASE_ENABLE));
-	/* Digital data enable (only needed when resuming after suspend) */
-	RET_ON(imx636_clear_reg(imx636, IMX636_RO_LP_CTRL, IMX636_LP_OUTPUT_DISABLE));
+
+	switch (src) {
+	case PIXEL_ARRAY:
+		roi_ctrl.px_td_rstn = 1;
+		fallthrough;
+	case TIMEBASE_ONLY:
+		/* Digital data enable (only needed when resuming after suspend) */
+		RET_ON(imx636_write_reg(imx636, IMX636_RO_LP_CTRL, lp_ctrl.raw));
+		/* Time base enable */
+		RET_ON(imx636_write_reg(imx636, IMX636_RO_TIME_BASE_CTRL, timebase.raw));
+		/* Pixels enable */
+		RET_ON(imx636_write_reg(imx636, IMX636_ROI_CTRL, roi_ctrl.raw));
+		break;
+	case RO_PATTERN:
+		ro_ctrl.ro_td_self_test_en = 1;
+		/* Digital data enable (only needed when resuming after suspend) */
+		RET_ON(imx636_write_reg(imx636, IMX636_RO_LP_CTRL, lp_ctrl.raw));
+		/* Time base enable */
+		RET_ON(imx636_write_reg(imx636, IMX636_RO_TIME_BASE_CTRL, timebase.raw));
+		/* Pattern enable */
+		RET_ON(imx636_write_reg(imx636, IMX636_RO_CTRL, ro_ctrl.raw));
+		break;
+	default:
+		return -EINVAL;
+	}
 	return 0;
 }
 
 /**
  * imx636_stop_streaming() - Stop sensor stream
  * @imx636: pointer to imx636 device
- *
- * Return: 0 if successful, error code otherwise.
  */
-static int imx636_stop_streaming(struct imx636 *imx636)
+static void imx636_stop_streaming(struct imx636 *imx636)
 {
-	/* Skipping other accesses if one fail may not be the best policy, but overall,
-	 * if we can't do register accesses, we're doomed, one way or another
-	 */
-	/* Digital data disable */
-	RET_ON(imx636_set_reg(imx636, IMX636_RO_LP_CTRL, IMX636_LP_OUTPUT_DISABLE));
-	/* Timer base disable */
-	RET_ON(imx636_clear_reg(imx636, IMX636_RO_TIME_BASE_CTRL, IMX636_RO_TIME_BASE_ENABLE));
-	/* Pixel reset release */
-	RET_ON(imx636_clear_reg(imx636, IMX636_ROI_CTRL, IMX636_ROI_PX_TD_RSTN));
+	union ro_ctrl ro_ctrl = { .ro_digital_pipe_en = 1, };
+	union timebase_ctrl timebase = { .enable = 0, };
+	union ro_lowpower_ctrl lp_ctrl = { .output_disable = 1, };
+	union roi_ctrl roi_ctrl = {
+		.px_td_rstn = 0,      /* pixels in reset */
+		.pix_roi_slope_n = 3, /* default value */
+		.pix_roi_slope_p = 3, /* default value */
+	};
+
+	/* errors are ignored, do best effort if CCI fails */
+	/* stop propagating data in the digital pipeline */
+	imx636_write_reg(imx636, IMX636_RO_LP_CTRL, lp_ctrl.raw);
+	/* reset all pixels */
+	imx636_write_reg(imx636, IMX636_ROI_CTRL, roi_ctrl.raw);
+	/* disable RO pattern */
+	imx636_write_reg(imx636, IMX636_RO_CTRL, ro_ctrl.raw);
+	/* diasble timebase */
+	imx636_write_reg(imx636, IMX636_RO_TIME_BASE_CTRL, timebase.raw);
 	/* MIPI CSI-2 disable */
-	RET_ON(imx636_clear_reg(imx636, IMX636_MIPI_CONTROL, IMX636_MIPI_CSI_ENABLE));
-	return 0;
+	imx636_clear_reg(imx636, IMX636_MIPI_CONTROL, IMX636_MIPI_CSI_ENABLE);
 }
 
 /**
@@ -987,7 +1081,7 @@ static int imx636_set_stream(struct v4l2_subdev *sd, int enable)
 			return 0;
 		}
 
-		ret = imx636_start_streaming(imx636);
+		ret = imx636_start_streaming(imx636, imx636->pattern_ctrl->val);
 		if (ret) {
 			mutex_unlock(&imx636->mutex);
 			pm_runtime_put(imx636->dev);
@@ -1531,6 +1625,30 @@ static int create_bias_controls(struct imx636 *imx636)
 	return 0;
 }
 
+/* -----------------------------------------------------------------------------
+ * Test patterns control
+ */
+
+static int pattern_s_ctrl(struct v4l2_ctrl *ctrl)
+{
+	struct imx636 *imx636 =
+		container_of(ctrl->handler, struct imx636, ctrls);
+
+	/* The control value is read at start, setting it before that would
+	 * generate data without anything to receive it.
+	 */
+	if (!imx636->streaming)
+		return 0;
+
+	imx636_stop_streaming(imx636);
+	return imx636_start_streaming(imx636, ctrl->val);
+}
+
+static const struct v4l2_ctrl_ops test_pattern_ctrl_ops = {
+	.s_ctrl = pattern_s_ctrl,
+};
+
+
 /**
  * imx636_probe() - I2C client device binding
  * @client: pointer to i2c client device
@@ -1598,6 +1716,13 @@ static int imx636_probe(struct i2c_client *client)
 	v4l2_ctrl_handler_init(&imx636->ctrls, 10);
 	imx636->ctrls.lock = &imx636->mutex;
 	create_bias_controls(imx636);
+
+	imx636->pattern_ctrl = v4l2_ctrl_new_std_menu_items(
+		imx636->sd.ctrl_handler,
+		&test_pattern_ctrl_ops,
+		V4L2_CID_TEST_PATTERN,
+		ARRAY_SIZE(event_source_name) - 1,
+		0, PIXEL_ARRAY, event_source_name);
 
 	ret = v4l2_async_register_subdev_sensor(&imx636->sd);
 	if (ret < 0) {
