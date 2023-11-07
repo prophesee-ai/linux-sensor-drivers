@@ -41,6 +41,8 @@
 #define IMX636_CHIP_ID 0x14
 #define IMX636_ID 0xA0401806
 
+#define IMX636_SPARE_CTRL0 0x18
+
 #define IMX636_DV_CTRL 0xB8
 #define IMX636_DV_PC_CLKDIVEN BIT(0)
 #define IMX636_DV_PC_SYSCLKEN BIT(3)
@@ -53,6 +55,31 @@
 
 #define IMX636_STANDBY_CTRL 0xC8
 #define IMX636_STANDBY_VALUE 0x101
+
+/* Bias registers */
+#define BIAS_BASE 0x1000
+
+union bgen {
+	struct {
+		u32 idac_ctl   :8;
+		u32 vdac_ctl   :8;
+		u32 buf_stg    :3; /* output buffer impedance */
+		u32 ibtype_sel :1; /* input cgm_sub or v_to_i */
+		u32 mux_sel    :1; /* output idac(0) or vdac(1) */
+		u32 mux_en     :1; /* mux en */
+		u32 vdac_en    :1; /* vdac en */
+		u32 buf_en     :1; /* buffer en */
+		u32 idac_en    :1; /* idac en */
+		u32 scr_set    :1; /* */
+		u32 unused2    :2;
+		u32 single     :1; /* 1: update the hardware immediately */
+		u32 unused4    :4;
+	};
+	u32 raw;
+};
+
+/* BIAS bgen0_05 */
+#define IMX636_BIAS_DIFF (BIAS_BASE + 0x014)
 
 /* EDF registers */
 #define EDF_BASE 0x7000
@@ -72,6 +99,12 @@
 
 /* RO registers */
 #define RO_BASE 0x9000
+
+#define IMX636_RO_CTRL (RO_BASE + 0x000)
+#define IMX636_RO_TEST_PIXEL_MUX_EN BIT(0)
+#define IMX636_RO_TD_SELF_TEST_EN BIT(1)
+#define IMX636_RO_ANALOG_PIPE_EN BIT(3)
+#define IMX636_RO_DIGITAL_PIPE_EN BIT(9)
 
 #define IMX636_RO_TIME_BASE_CTRL (RO_BASE + 0x008)
 #define IMX636_RO_TIME_BASE_ENABLE BIT(0)
@@ -658,6 +691,40 @@ static int imx636_reconfigure_csi2_freq(struct imx636 *imx636)
 }
 
 /**
+ * imx636_tune_analog() - Update factory settings
+ * @imx636: pointer to imx636 device
+ *
+ * Return: 0 if successful, error code otherwise.
+ */
+static int imx636_tune_analog(struct imx636 *imx636)
+{
+	union bgen bias_diff = { {
+			.idac_ctl = 0x4d,
+			.vdac_ctl = 0x50,
+			.buf_stg = 5,
+			.ibtype_sel = 0,
+			.mux_sel = 0,
+			.mux_en = 1,
+			.vdac_en = 0,
+			.buf_en = 1,
+			.idac_en = 1,
+			.scr_set = 0,
+			.single = 1,
+		} };
+
+	/* Set Pixel monitor reference current control to Pmos leak */
+	/* reason is not documented */
+	RET_ON(imx636_write_reg(imx636, IMX636_SPARE_CTRL0, 0x200));
+	/* Set bias diff 0 idac at 4d */
+	/* datatsheet tell it should be 4D, my part boot with 54 */
+	RET_ON(imx636_write_reg(imx636, IMX636_BIAS_DIFF, bias_diff.raw));
+	/* Disable analog pipeline */
+	/* Analog queueing seems to generate artifacts in some conditions */
+	RET_ON(imx636_clear_reg(imx636, IMX636_RO_CTRL, IMX636_RO_ANALOG_PIPE_EN));
+	return 0;
+}
+
+/**
  * imx636_start_streaming() - Start sensor stream
  * @imx636: pointer to imx636 device
  *
@@ -723,6 +790,10 @@ static int imx636_set_stream(struct v4l2_subdev *sd, int enable)
 			goto error_unlock;
 
 		ret = imx636_reconfigure_csi2_freq(imx636);
+		if (ret)
+			goto error_power_off;
+
+		ret = imx636_tune_analog(imx636);
 		if (ret)
 			goto error_power_off;
 
