@@ -15,9 +15,14 @@
 #define MEDIA_BUS_FMT_PSEE_EVT2 0x5300
 #endif
 
+#ifndef V4L2_PIX_FMT_PSEE_EVT21ME
+#define V4L2_PIX_FMT_PSEE_EVT21ME v4l2_fourcc('P', 'S', 'E', '1')
+#define MEDIA_BUS_FMT_PSEE_EVT21ME 0x5301
+#endif
+
 #ifndef V4L2_PIX_FMT_PSEE_EVT21
 #define V4L2_PIX_FMT_PSEE_EVT21 v4l2_fourcc('P', 'S', 'E', '2')
-#define MEDIA_BUS_FMT_PSEE_EVT21 0x5301
+#define MEDIA_BUS_FMT_PSEE_EVT21 0x5303
 #endif
 
 #ifndef V4L2_PIX_FMT_PSEE_EVT3
