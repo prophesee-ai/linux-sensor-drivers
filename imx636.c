@@ -256,13 +256,6 @@ struct imx636 {
 	bool streaming;
 };
 
-/* Supported sensor media formats */
-static const u32 supported_formats[] = {
-	MEDIA_BUS_FMT_PSEE_EVT3,
-	MEDIA_BUS_FMT_PSEE_EVT21,
-};
-
-
 /**
  * to_imx636() - imx636 V4L2 sub-device to imx636 device.
  * @subdev: pointer to imx636 V4L2 sub-device
@@ -402,11 +395,20 @@ static int imx636_enum_mbus_code(struct v4l2_subdev *sd,
 				 struct v4l2_subdev_state *sd_state,
 				 struct v4l2_subdev_mbus_code_enum *code)
 {
-	if (code->index >= ARRAY_SIZE(supported_formats))
+	switch (code->index) {
+	case 0:
+		code->code = MEDIA_BUS_FMT_PSEE_EVT3;
+		break;
+	case 1:
+		code->code = MEDIA_BUS_FMT_PSEE_EVT21ME;
+#ifdef __BIG_ENDIAN
+		/* On BE, the Evt2.1 event is in the right order*/
+		code->code = MEDIA_BUS_FMT_PSEE_EVT21;
+#endif
+		break;
+	default:
 		return -EINVAL;
-
-	code->code = supported_formats[code->index];
-
+	}
 	return 0;
 }
 
@@ -503,11 +505,21 @@ static int imx636_set_pad_format(struct v4l2_subdev *sd,
 
 	mutex_lock(&imx636->mutex);
 
-	code = supported_formats[0];
-	for (i = 0; i < ARRAY_SIZE(supported_formats); i++) {
-		if (supported_formats[i] == fmt->format.code)
-			code = supported_formats[i];
+	switch (fmt->format.code) {
+	case MEDIA_BUS_FMT_PSEE_EVT21:
+	case MEDIA_BUS_FMT_PSEE_EVT21ME:
+		code = MEDIA_BUS_FMT_PSEE_EVT21ME;
+#ifdef __BIG_ENDIAN
+		/* On BE, the Evt2.1 event is in the right order*/
+		code = MEDIA_BUS_FMT_PSEE_EVT21;
+#endif
+		break;
+	case MEDIA_BUS_FMT_PSEE_EVT3:
+	default:
+		code = MEDIA_BUS_FMT_PSEE_EVT3;
+		break;
 	}
+
 	imx636_fill_pad_format(imx636, code, fmt);
 
 	if (fmt->which == V4L2_SUBDEV_FORMAT_TRY) {
@@ -534,12 +546,10 @@ static int imx636_set_pad_format(struct v4l2_subdev *sd,
 static int imx636_init_pad_cfg(struct v4l2_subdev *sd,
 			       struct v4l2_subdev_state *sd_state)
 {
-	struct imx636 *imx636 = to_imx636(sd);
 	struct v4l2_subdev_format fmt = { 0 };
 
-	fmt.which = sd_state ? V4L2_SUBDEV_FORMAT_TRY : V4L2_SUBDEV_FORMAT_ACTIVE;
-	imx636_fill_pad_format(imx636, supported_formats[0], &fmt);
-
+	/* Just try a bad format to get the good one */
+	fmt.which = V4L2_SUBDEV_FORMAT_TRY;
 	return imx636_set_pad_format(sd, sd_state, &fmt);
 }
 
@@ -566,6 +576,7 @@ static int imx636_apply_format(struct imx636 *imx636)
 
 	switch (imx636->format_code) {
 	case MEDIA_BUS_FMT_PSEE_EVT21:
+	case MEDIA_BUS_FMT_PSEE_EVT21ME:
 		byte_order = IMX636_EOI_BYTE_ORDER_32LE;
 		ret = imx636_write_reg(imx636, IMX636_EDF_PIPELINE_CONTROL,
 			IMX636_EDF_PIPELINE_EVT21);
@@ -1149,7 +1160,7 @@ static int imx636_probe(struct i2c_client *client)
 	}
 
 	/* Set default output format */
-	imx636->format_code = supported_formats[0];
+	imx636->format_code = MEDIA_BUS_FMT_PSEE_EVT3;
 
 	/* Initialize subdev */
 	imx636->sd.flags |= V4L2_SUBDEV_FL_HAS_DEVNODE;
