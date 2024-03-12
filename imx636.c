@@ -436,6 +436,57 @@ static int imx636_enum_frame_size(struct v4l2_subdev *sd,
 }
 
 /**
+ * imx636_apply_format() - Set the sensor to output the selected format
+ * @imx636: pointer to imx636 device
+ * @format_code: format code to set
+ *
+ * Return: 0 if successful, error code otherwise.
+ */
+static int imx636_apply_format(struct imx636 *imx636, u32 format_code)
+{
+	int ret;
+	u32 eoi_value;
+	u32 byte_order;
+
+	/* From CSI-2 point of view, the data is always "User Defined 8-bit Data Type 1",
+	 * (cf Section 11.5 of CSI-2 Specification).
+	 * To ease the decoding, the sensor reorders multi-byte data to match receiver
+	 * byte-ordering.
+	 */
+	ret = imx636_read_reg(imx636, IMX636_EOI_PIPELINE_CONTROL, 1, &eoi_value);
+	if (ret)
+		return ret;
+
+	switch (imx636->format_code) {
+	case MEDIA_BUS_FMT_PSEE_EVT21:
+	case MEDIA_BUS_FMT_PSEE_EVT21ME:
+		byte_order = IMX636_EOI_BYTE_ORDER_32LE;
+		ret = imx636_write_reg(imx636, IMX636_EDF_PIPELINE_CONTROL,
+			IMX636_EDF_PIPELINE_EVT21);
+		if (ret)
+			return ret;
+		break;
+	case MEDIA_BUS_FMT_PSEE_EVT3:
+		byte_order = IMX636_EOI_BYTE_ORDER_16LE;
+		ret = imx636_write_reg(imx636, IMX636_EDF_PIPELINE_CONTROL,
+			IMX636_EDF_PIPELINE_EVT3);
+		if (ret)
+			return ret;
+		break;
+	default:
+		return -EINVAL;
+	}
+
+	eoi_value &= ~IMX636_EOI_BYTE_ORDER_MASK;
+#ifdef __BIG_ENDIAN
+	/* On Big-endian architectures, no reordering should be necessary */
+	byte_order = IMX636_EOI_BYTE_ORDER_32BE;
+#endif
+	eoi_value |= byte_order;
+	return imx636_write_reg(imx636, IMX636_EOI_PIPELINE_CONTROL, eoi_value);
+}
+
+/**
  * imx636_fill_pad_format() - Fill subdevice pad format
  *                            from selected media format
  * @imx636: pointer to imx636 device
@@ -501,9 +552,13 @@ static int imx636_set_pad_format(struct v4l2_subdev *sd,
 	struct imx636 *imx636 = to_imx636(sd);
 	u32 code;
 	int ret = 0;
-	int i;
 
 	mutex_lock(&imx636->mutex);
+
+	if (imx636->streaming) {
+		mutex_unlock(&imx636->mutex);
+		return -EBUSY;
+	}
 
 	switch (fmt->format.code) {
 	case MEDIA_BUS_FMT_PSEE_EVT21:
@@ -528,9 +583,22 @@ static int imx636_set_pad_format(struct v4l2_subdev *sd,
 		framefmt = v4l2_subdev_get_try_format(sd, sd_state, fmt->pad);
 		*framefmt = fmt->format;
 	} else {
-		imx636->format_code = code;
-	}
+		/* There is actually a race condition here: if someone is enabling the sensor, and
+		 * set_pad_format happens after the init (which takes imx636->mutex) but before
+		 * pm state switches from RPM_RESUMING to RPM_ACTIVE, the format change won't be
+		 * done on the Event Data Formater, and the pm_state is not completely locked while
+		 * we read it.
+		 * locking the pm_state is not an option as it may result in an interlock.
+		 * A try_lock may be considered though.
+		 */
+		/* Directly apply the format if the sensor is already initialized */
+		if (pm_runtime_active(imx636->dev))
+			ret = imx636_apply_format(imx636, code);
 
+		/* Don't update format if the sensor access failed */
+		if (!ret)
+			imx636->format_code = code;
+	}
 	mutex_unlock(&imx636->mutex);
 
 	return ret;
@@ -543,64 +611,13 @@ static int imx636_set_pad_format(struct v4l2_subdev *sd,
  *
  * Return: 0 if successful, error code otherwise.
  */
-static int imx636_init_pad_cfg(struct v4l2_subdev *sd,
-			       struct v4l2_subdev_state *sd_state)
+static int imx636_init_pad_cfg(struct v4l2_subdev *sd, struct v4l2_subdev_state *sd_state)
 {
 	struct v4l2_subdev_format fmt = { 0 };
 
 	/* Just try a bad format to get the good one */
 	fmt.which = V4L2_SUBDEV_FORMAT_TRY;
 	return imx636_set_pad_format(sd, sd_state, &fmt);
-}
-
-/**
- * imx636_apply_format() - Set the sensor to output the selected format
- * @imx636: pointer to imx636 device
- *
- * Return: 0 if successful, error code otherwise.
- */
-static int imx636_apply_format(struct imx636 *imx636)
-{
-	int ret;
-	u32 eoi_value;
-	u32 byte_order;
-
-	/* From CSI-2 point of view, the data is always "User Defined 8-bit Data Type 1",
-	 * (cf Section 11.5 of CSI-2 Specification).
-	 * To ease the decoding, the sensor reorders multi-byte data to match receiver
-	 * byte-ordering.
-	 */
-	ret = imx636_read_reg(imx636, IMX636_EOI_PIPELINE_CONTROL, 1, &eoi_value);
-	if (ret)
-		return ret;
-
-	switch (imx636->format_code) {
-	case MEDIA_BUS_FMT_PSEE_EVT21:
-	case MEDIA_BUS_FMT_PSEE_EVT21ME:
-		byte_order = IMX636_EOI_BYTE_ORDER_32LE;
-		ret = imx636_write_reg(imx636, IMX636_EDF_PIPELINE_CONTROL,
-			IMX636_EDF_PIPELINE_EVT21);
-		if (ret)
-			return ret;
-		break;
-	case MEDIA_BUS_FMT_PSEE_EVT3:
-		byte_order = IMX636_EOI_BYTE_ORDER_16LE;
-		ret = imx636_write_reg(imx636, IMX636_EDF_PIPELINE_CONTROL,
-			IMX636_EDF_PIPELINE_EVT3);
-		if (ret)
-			return ret;
-		break;
-	default:
-		return -EINVAL;
-	}
-
-	eoi_value &= ~IMX636_EOI_BYTE_ORDER_MASK;
-#ifdef __BIG_ENDIAN
-	/* On Big-endian architectures, no reordering should be necessary */
-	byte_order = IMX636_EOI_BYTE_ORDER_32BE;
-#endif
-	eoi_value |= byte_order;
-	return imx636_write_reg(imx636, IMX636_EOI_PIPELINE_CONTROL, eoi_value);
 }
 
 /**
@@ -736,6 +753,20 @@ static int imx636_tune_analog(struct imx636 *imx636)
 }
 
 /**
+ * imx636_init() - Set sensor ready to stream
+ * @imx636: pointer to imx636 device
+ *
+ * Return: 0 if successful, error code otherwise.
+ */
+static int imx636_init(struct imx636 *imx636)
+{
+	RET_ON(imx636_reconfigure_csi2_freq(imx636));
+	RET_ON(imx636_tune_analog(imx636));
+	RET_ON(imx636_apply_format(imx636, imx636->format_code));
+	return 0;
+}
+
+/**
  * imx636_start_streaming() - Start sensor stream
  * @imx636: pointer to imx636 device
  *
@@ -796,42 +827,34 @@ static int imx636_set_stream(struct v4l2_subdev *sd, int enable)
 	}
 
 	if (enable) {
-		ret = pm_runtime_resume_and_get(imx636->dev);
-		if (ret)
-			goto error_unlock;
+		/* the sensor must be enabled, and the startup sequence locks the mutex too */
+		mutex_unlock(&imx636->mutex);
+		RET_ON(pm_runtime_resume_and_get(imx636->dev));
+		mutex_lock(&imx636->mutex);
 
-		ret = imx636_reconfigure_csi2_freq(imx636);
-		if (ret)
-			goto error_power_off;
-
-		ret = imx636_tune_analog(imx636);
-		if (ret)
-			goto error_power_off;
-
-		ret = imx636_apply_format(imx636);
-		if (ret)
-			goto error_power_off;
+		/* I don't know if V4L2 core prevents two s_stream in parallel */
+		if (imx636->streaming == enable) {
+			mutex_unlock(&imx636->mutex);
+			pm_runtime_put(imx636->dev);
+			return 0;
+		}
 
 		ret = imx636_start_streaming(imx636);
-		if (ret)
-			goto error_power_off;
+		if (ret) {
+			mutex_unlock(&imx636->mutex);
+			pm_runtime_put(imx636->dev);
+			return ret;
+		}
+		imx636->streaming = true;
+		mutex_unlock(&imx636->mutex);
 	} else {
 		imx636_stop_streaming(imx636);
+		imx636->streaming = false;
+		mutex_unlock(&imx636->mutex);
 		pm_runtime_put(imx636->dev);
 	}
 
-	imx636->streaming = enable;
-
-	mutex_unlock(&imx636->mutex);
-
 	return 0;
-
-error_power_off:
-	pm_runtime_put(imx636->dev);
-error_unlock:
-	mutex_unlock(&imx636->mutex);
-
-	return ret;
 }
 
 /**
@@ -879,8 +902,7 @@ static int imx636_parse_hw_config(struct imx636 *imx636)
 		return -ENXIO;
 
 	/* Request optional reset pin */
-	imx636->nreset_gpio = devm_gpiod_get_optional(imx636->dev, "nreset",
-						     GPIOD_OUT_LOW);
+	imx636->nreset_gpio = devm_gpiod_get_optional(imx636->dev, "nreset", GPIOD_OUT_LOW);
 	if (IS_ERR(imx636->nreset_gpio)) {
 		dev_err(imx636->dev, "failed to get reset gpio %ld",
 			PTR_ERR(imx636->nreset_gpio));
@@ -888,8 +910,7 @@ static int imx636_parse_hw_config(struct imx636 *imx636)
 	}
 
 	/* Request optional xclr pin */
-	imx636->xclr_gpio = devm_gpiod_get_optional(imx636->dev, "xclr",
-						     GPIOD_OUT_LOW);
+	imx636->xclr_gpio = devm_gpiod_get_optional(imx636->dev, "xclr", GPIOD_OUT_LOW);
 	if (IS_ERR(imx636->xclr_gpio)) {
 		dev_err(imx636->dev, "failed to get xclr gpio %ld",
 			PTR_ERR(imx636->xclr_gpio));
@@ -1021,35 +1042,37 @@ static const struct v4l2_subdev_ops imx636_subdev_ops = {
  * There is a misc register switching to a magic value at the end of sensor boot process
  * It should be covered by the wait time given by Sony, thus this is just a sanity check
  */
-static void imx636_check_boot(struct imx636 *imx636)
+static int imx636_check_boot(struct imx636 *imx636)
 {
 	int ret;
 	u32 val;
 
 	ret = imx636_read_reg(imx636, IMX636_MBX_MISC, 1, &val);
-	if (ret)
-		dev_warn(imx636->dev, "could not get the boot magic");
-	if (val != IMX636_BOOT_MAGIC)
-		dev_warn(imx636->dev, "unexpected boot magic, got %u, expected %u",
+	if (ret) {
+		dev_err(imx636->dev, "could not get the boot magic");
+		return ret;
+	}
+	if (val != IMX636_BOOT_MAGIC) {
+		dev_err(imx636->dev, "unexpected boot magic, got %u, expected %u",
 			val, IMX636_BOOT_MAGIC);
+		return -EIO;
+	}
+	return 0;
 }
 
 /**
- * imx636_power_on() - Sensor power on sequence
- * @dev: pointer to i2c device
+ * enable_power_and_clock() - Enable stuff outside of the sensor
+ * @imx636: pointer to the imx636 device
  *
  * Return: 0 if successful, error code otherwise.
  */
-static int imx636_power_on(struct device *dev)
+static int enable_power_and_clock(struct imx636 *imx636)
 {
-	struct v4l2_subdev *sd = dev_get_drvdata(dev);
-	struct imx636 *imx636 = to_imx636(sd);
 	int ret;
 
-	ret = regulator_bulk_enable(ARRAY_SIZE(imx636_supply_names),
-				    imx636->supplies);
+	ret = regulator_bulk_enable(ARRAY_SIZE(imx636_supply_names), imx636->supplies);
 	if (ret < 0) {
-		dev_err(dev, "failed to enable regulators");
+		dev_err(imx636->dev, "failed to enable regulators");
 		return ret;
 	}
 
@@ -1060,8 +1083,8 @@ static int imx636_power_on(struct device *dev)
 
 	ret = clk_prepare_enable(imx636->inclk);
 	if (ret) {
-		dev_err(imx636->dev, "fail to enable inclk");
-		goto error_reset;
+		dev_err(imx636->dev, "failed to enable inclk");
+		goto error_preparing_clk;
 	}
 
 	/* Trstn_start = 200ns (min) */
@@ -1071,33 +1094,21 @@ static int imx636_power_on(struct device *dev)
 	/* Tstart = 15ms (min) */
 	/* but CCAM5 introduces 48ms +/-15% delay */
 	msleep_interruptible(15 + 55);
-	imx636_check_boot(imx636);
-
 	return 0;
 
-error_reset:
-	gpiod_set_value_cansleep(imx636->nreset_gpio, 0);
-	regulator_bulk_disable(ARRAY_SIZE(imx636_supply_names),
-			       imx636->supplies);
+error_preparing_clk:
+	gpiod_set_value_cansleep(imx636->xclr_gpio, 0);
+	regulator_bulk_disable(ARRAY_SIZE(imx636_supply_names), imx636->supplies);
 
 	return ret;
 }
 
 /**
- * imx636_power_off() - Sensor power off sequence
- * @dev: pointer to i2c device
- *
- * Return: 0 if successful, error code otherwise.
+ * disable_power_and_clock() - Disable stuff outside of the sensor
+ * @imx636: pointer to the imx636 device
  */
-static int imx636_power_off(struct device *dev)
+static void disable_power_and_clock(struct imx636 *imx636)
 {
-	struct v4l2_subdev *sd = dev_get_drvdata(dev);
-	struct imx636 *imx636 = to_imx636(sd);
-
-	imx636_write_reg(imx636, IMX636_STANDBY_CTRL, IMX636_STANDBY_VALUE);
-	/* Tstopwait = 15ms (min) */
-	msleep_interruptible(15);
-
 	gpiod_set_value_cansleep(imx636->nreset_gpio, 0);
 	/* Tclk_pd = 200ns (min) */
 	usleep_range(1, 100);
@@ -1108,9 +1119,68 @@ static int imx636_power_off(struct device *dev)
 	usleep_range(1, 100);
 	gpiod_set_value_cansleep(imx636->xclr_gpio, 0);
 
-	regulator_bulk_disable(ARRAY_SIZE(imx636_supply_names),
-			       imx636->supplies);
+	regulator_bulk_disable(ARRAY_SIZE(imx636_supply_names), imx636->supplies);
+}
 
+/**
+ * imx636_power_on() - Sensor power on sequence
+ * @dev: pointer to linux device representing the imx636
+ *
+ * Return: 0 if successful, error code otherwise.
+ */
+static int imx636_power_on(struct device *dev)
+{
+	struct v4l2_subdev *sd = dev_get_drvdata(dev);
+	struct imx636 *imx636 = to_imx636(sd);
+	int ret;
+
+	mutex_lock(&imx636->mutex);
+
+	ret = enable_power_and_clock(imx636);
+	if (ret)
+		goto error_enable_power_and_clock;
+
+	ret = imx636_check_boot(imx636);
+	if (ret)
+		goto error_checking_boot;
+
+	ret = imx636_init(imx636);
+	if (ret)
+		goto error_init;
+
+	mutex_unlock(&imx636->mutex);
+	return 0;
+
+error_init:
+error_checking_boot:
+	imx636_write_reg(imx636, IMX636_STANDBY_CTRL, IMX636_STANDBY_VALUE);
+	/* Tstopwait = 15ms (min) */
+	msleep_interruptible(15);
+	disable_power_and_clock(imx636);
+error_enable_power_and_clock:
+	mutex_unlock(&imx636->mutex);
+	return ret;
+}
+
+/**
+ * imx636_power_off() - Sensor power off sequence
+ * @dev: pointer to linux device representing the imx636
+ *
+ * Return: 0 if successful, error code otherwise.
+ */
+static int imx636_power_off(struct device *dev)
+{
+	struct v4l2_subdev *sd = dev_get_drvdata(dev);
+	struct imx636 *imx636 = to_imx636(sd);
+
+	mutex_lock(&imx636->mutex);
+	imx636_write_reg(imx636, IMX636_STANDBY_CTRL, IMX636_STANDBY_VALUE);
+	/* Tstopwait = 15ms (min) */
+	msleep_interruptible(15);
+
+	disable_power_and_clock(imx636);
+
+	mutex_unlock(&imx636->mutex);
 	return 0;
 }
 
@@ -1146,17 +1216,17 @@ static int imx636_probe(struct i2c_client *client)
 
 	mutex_init(&imx636->mutex);
 
-	ret = imx636_power_on(imx636->dev);
+	ret = enable_power_and_clock(imx636);
 	if (ret) {
 		dev_err(imx636->dev, "failed to power-on the sensor");
-		goto error_mutex_destroy;
+		goto error_enable_power;
 	}
 
 	/* Check module identity */
 	ret = imx636_detect(imx636);
 	if (ret) {
 		dev_err(imx636->dev, "failed to find sensor: %d", ret);
-		goto error_power_off;
+		goto error_detect_imx636;
 	}
 
 	/* Set default output format */
@@ -1173,14 +1243,14 @@ static int imx636_probe(struct i2c_client *client)
 	ret = media_entity_pads_init(&imx636->sd.entity, 1, &imx636->pad);
 	if (ret) {
 		dev_err(imx636->dev, "failed to init entity pads: %d", ret);
-		goto error_handler_free;
+		goto error_init_entity;
 	}
 
 	ret = v4l2_async_register_subdev_sensor(&imx636->sd);
 	if (ret < 0) {
 		dev_err(imx636->dev,
 			"failed to register async subdev: %d", ret);
-		goto error_media_entity;
+		goto error_register_subdev;
 	}
 
 	pm_runtime_set_active(imx636->dev);
@@ -1189,13 +1259,12 @@ static int imx636_probe(struct i2c_client *client)
 
 	return 0;
 
-error_media_entity:
+error_register_subdev:
 	media_entity_cleanup(&imx636->sd.entity);
-error_handler_free:
-	v4l2_ctrl_handler_free(imx636->sd.ctrl_handler);
-error_power_off:
-	imx636_power_off(imx636->dev);
-error_mutex_destroy:
+error_init_entity:
+error_detect_imx636:
+	disable_power_and_clock(imx636);
+error_enable_power:
 	mutex_destroy(&imx636->mutex);
 
 	return ret;
