@@ -229,7 +229,6 @@ static const struct link_timing {
 /**
  * struct imx636 - imx636 sensor device structure
  * @dev: Pointer to generic device
- * @client: Pointer to i2c client
  * @sd: V4L2 sub-device
  * @pad: Media pad. Only one pad supported
  * @nreset_gpio: Sensor RSTn gpio
@@ -243,7 +242,6 @@ static const struct link_timing {
  */
 struct imx636 {
 	struct device *dev;
-	struct i2c_client *client;
 	struct v4l2_subdev sd;
 	struct media_pad pad;
 	struct gpio_desc *nreset_gpio;
