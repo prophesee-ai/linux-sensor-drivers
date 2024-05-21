@@ -1,0 +1,107 @@
+.. SPDX-License-Identifier: GPL-2.0
+
+Sony IMX636 sensor driver
+=========================
+
+Introduction
+------------
+
+The Sony IMX636 sensor is an Event-Based Vision Sensor (EVS) designed in
+cooperation between Sony and Prophesee. An EVS detects movement with high
+temporal resolution by detecting luminance changes, which each pixel senses
+asynchronously, and only outputting the differential data after combining with
+the coordinate and time information.
+
+Difference with conventional sensors
+------------------------------------
+
+Leaving aside the image processing algorithms, from a system point of view, in
+an EVS, each pixel produces data asynchrously, as a result, there is no repeted
+data structure, such as the frame in usual, frame-based, vision sensors, and
+there is no fixed-rate output. Instead, there is a stream of independent pixel
+events (usually the pixel coordinates, the polarity of the luminance change
+-increasing or decreasing-, and the timestamp of the event, to reject the
+acquisition pipeline jitter when processing the data.
+
+As a consequence, many rules of frame-based sensors do not apply to EVS. To
+expose EVS data to software, some packetization will happen, but it is
+arbitrary, it does not follow the size of the pixel array, and there is no
+fixed frame rate.
+
+Hardware interface
+------------------
+
+The Sony IMX636 sensor outputs data on a 2lane MIPI CSI-2 link
+(up to 1.5 Gbps/lane), using by default the
+User Defined 8-bit Data Type 1 (0x30) of the standard,
+or on 4lane SLVS (800 Mbps/lane).
+
+Regarding packetization on the CSI-2, the IMX636 uses both variable packet
+size (one packet being usually one line) and variable number of packet per
+frame.
+
+For control, the sensor uses I2C with register addresses on 32 bits.
+
+Driver features
+---------------
+
+The driver uses devicetree to get platform information.
+
+It is exposed as a V4L-subdevice, with a media-ctl interface.
+
+Currently, the driver supports
+
+- 20MHz input clock
+- MIPI CSI-2 output on 2 lanes (D-PHY)
+- default packetization
+- lanes at 600, 800, 1200 or 1500MHz
+- data output in EVT 2.1 (with limitations) or EVT 3.0
+
+Output format control
+---------------------
+
+The sensor data is not raw pixel intensity measurement, but rather a stream of
+change events. Several encoding exists for such event, prioritizing bandwidth,
+hardware or software decoding. IMX636 supports EVT2.1 and EVT 3.0,
+defined by `Prophesee <https://docs.prophesee.ai/stable/data/encoding_formats/index.html>`_,
+which are not known of Linux mainline kernel. This driver is maintained
+out-of-tree, and in case it is built against a kernel that does not define them,
+it defines them as
+
+.. code-block:: C
+
+   #define MEDIA_BUS_FMT_PSEE_EVT2 0x5300
+   #define MEDIA_BUS_FMT_PSEE_EVT21ME 0x5301
+   #define MEDIA_BUS_FMT_PSEE_EVT21 0x5303
+   #define MEDIA_BUS_FMT_PSEE_EVT3 0x5302
+
+The codes have been chosen to reduce the risk of conflict with new
+types that may appear upstream, but are likely to be moved if they are
+themself integrated upstream, requiring a rebuild of the userspace with the new
+definitions if this happen and a system switch to an upstream kernel.
+
+The EVT 2.1 uses 64-bit events, and EVT 3.0 uses 16-bit events. As the data type
+on MIPI CSI-2 is defined as 8-bit, the receiver won't manage the data
+endianness, and the driver configures the sensor to follow the endianness of the
+machine running the driver code.
+
+Other video processing software brings the endianness information up to the
+applicative level, thus the behavior of this driver is subject to change on
+big-endian systems. To day, it has never been used on a big-endian system.
+
+On little-endian system, the IMX636 is not able to output EVT 2.1 data matching
+the specification: the EVT 2.1 has a vector of 32 bits on its LSB, and it is
+sent after the other fields on IMX636, swapping the two 32-bit halves of the
+event, resulting in some middle-endian encoding. This behavior is advertised as
+``PSEE_EVT21ME`` on the driver.
+
+Provided that ``media-ctl`` from `v4l-utils <https://linuxtv.org/wiki/index.php/V4l-utils>`_
+has been built with the above media codes in its sources, it can be used to
+configure the IMX636 output format as follow:
+
+.. code-block:: none
+
+	media-ctl -V "'imx636 6-003c':0[fmt:PSEE_EVT21/1280x720]"
+
+If either ``PSEE_EVT21`` or ``PSEE_EVT21ME`` is requested, the format is set to
+``PSEE_EVT21ME``, otherwise, ``PSEE_EVT3`` is set.
