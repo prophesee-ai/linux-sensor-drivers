@@ -1,4 +1,4 @@
-obj-m := imx636.o
+obj-m := imx636.o genx320.o
 
 SRC := $(shell pwd)
 
