@@ -497,9 +497,44 @@ done_endpoint_free:
 	return ret;
 }
 
+#ifdef CONFIG_VIDEO_ADV_DEBUG
+static int genx320_g_register(struct v4l2_subdev *sd, struct v4l2_dbg_register *reg)
+{
+	struct genx320 *genx320 = to_genx320(sd);
+	u32 val;
+	int ret;
+
+	if ((reg->reg % 4) || reg->reg > 0xFFF0)
+		return -EINVAL;
+
+	ret = genx320_read_reg(genx320, (u16)reg->reg, 1, &val);
+	reg->val = val;
+	reg->size = 4;
+
+	return ret;
+}
+
+static int genx320_s_register(struct v4l2_subdev *sd, const struct v4l2_dbg_register *reg)
+{
+	struct genx320 *genx320 = to_genx320(sd);
+
+	if ((reg->reg % 4) || reg->reg > 0xFFF0)
+		return -EINVAL;
+
+	return genx320_write_reg(genx320, (u16)reg->reg, (u32)reg->val);
+}
+#endif /* def CONFIG_VIDEO_ADV_DEBUG */
+
 /* V4l2 subdevice ops */
 static const struct v4l2_subdev_video_ops genx320_video_ops = {
 	.s_stream = genx320_set_stream,
+};
+
+static const struct v4l2_subdev_core_ops genx320_core_ops = {
+#ifdef CONFIG_VIDEO_ADV_DEBUG
+	.g_register = genx320_g_register,
+	.s_register = genx320_s_register,
+#endif
 };
 
 static const struct v4l2_subdev_pad_ops genx320_pad_ops = {
@@ -513,6 +548,7 @@ static const struct v4l2_subdev_pad_ops genx320_pad_ops = {
 static const struct v4l2_subdev_ops genx320_subdev_ops = {
 	.video = &genx320_video_ops,
 	.pad = &genx320_pad_ops,
+	.core = &genx320_core_ops,
 };
 
 /**
