@@ -16,6 +16,7 @@
 #include <media/v4l2-ctrls.h>
 #include <media/v4l2-fwnode.h>
 #include <media/v4l2-subdev.h>
+#include "genx320_registers.h"
 
 #define GENX320_PIXEL_ARRAY_WIDTH 320U
 #define GENX320_PIXEL_ARRAY_HEIGHT 320U
@@ -23,12 +24,29 @@
 #define GENX320_NUM_DATA_LANES 1
 #define GENX320_INCLK_RATE 20000000
 
+/* to avoid return value check on each register access */
+#define RET_ON(operation) do { int r = operation; if (unlikely(r != 0)) return r; } while (0)
+
 /*
  * Sensor registers
  */
 
 #define GENX320_CHIP_ID 0x14
 #define GENX320_ID 0xb0602003
+
+#define GENX320_BIAS_BASE 0x1000
+#define BIAS_PR_HV0 (GENX320_BIAS_BASE + 0x000)
+#define BIAS_FO_HV0 (GENX320_BIAS_BASE + 0x004)
+#define BIAS_FES_HV0 (GENX320_BIAS_BASE + 0x008)
+#define BIAS_HPF_LV0 (GENX320_BIAS_BASE + 0x100)
+#define BIAS_DIFF_ON_LV0 (GENX320_BIAS_BASE + 0x104)
+#define BIAS_DIFF_LV0 (GENX320_BIAS_BASE + 0x108)
+#define BIAS_DIFF_OFF_LV0 (GENX320_BIAS_BASE + 0x10C)
+#define BIAS_INV_LV0 (GENX320_BIAS_BASE + 0x110)
+#define BIAS_REFR_LV0 (GENX320_BIAS_BASE + 0x114)
+#define BIAS_INVP_LV0 (GENX320_BIAS_BASE + 0x118)
+#define BIAS_REQ_PU_LV0 (GENX320_BIAS_BASE + 0x11C)
+#define BIAS_SM_PDY_LV0 (GENX320_BIAS_BASE + 0x120)
 
 /* MBX registers */
 #define MBX_BASE 0xF000
@@ -71,12 +89,14 @@ struct genx320 {
 };
 
 static const s64 link_freq[] = {
-	600000000,
+	800000000,
 };
 
 /* Supported sensor media formats */
 static const u32 supported_formats[] = {
+	MEDIA_BUS_FMT_PSEE_EVT2,
 	MEDIA_BUS_FMT_PSEE_EVT3,
+	MEDIA_BUS_FMT_PSEE_EVT21,
 };
 
 
@@ -92,36 +112,34 @@ static inline struct genx320 *to_genx320(struct v4l2_subdev *subdev)
 }
 
 /**
- * genx320_read_reg() - Read registers.
+ * genx320_read() - Read registers.
  * @genx320: pointer to genx320 device
  * @reg: register address
- * @len: length of registers
  * @val: pointer to register array to be filled.
  *
  * Return: 0 if successful, error code otherwise.
  */
-static int genx320_read_reg(struct genx320 *genx320, u16 reg, u32 len, u32 *val)
+static int genx320_read(struct genx320 *genx320, u32 reg, u32 *val)
 {
 	struct i2c_client *client = v4l2_get_subdevdata(&genx320->sd);
 	struct i2c_msg xfer[2] = {0};
-	int i, ret;
+	int ret;
 
 	xfer[0].addr = client->addr;
-	reg = cpu_to_be16(reg);
+	reg = cpu_to_be16((u16)reg);
 	xfer[0].buf = (u8 *)&reg;
-	xfer[0].len = sizeof(reg);
+	xfer[0].len = 2; // genx320 registers are 16bits long
 	xfer[1].addr = client->addr;
 	xfer[1].flags = I2C_M_RD;
 	xfer[1].buf = (u8 *)val;
-	xfer[1].len = len * sizeof(*val);
+	xfer[1].len = sizeof(*val);
 
 	ret = i2c_transfer(client->adapter, xfer, 2);
 	if (ret != 2) {
 		dev_warn(genx320->dev, "read ret %d", ret);
 		ret = (ret < 0) ? ret : -EIO;
 	} else {
-		for (i = 0; i < len; i++)
-			val[i] = be32_to_cpu(val[i]);
+		*val = be32_to_cpu(*val);
 		ret = 0;
 	}
 
@@ -136,17 +154,17 @@ static int genx320_read_reg(struct genx320 *genx320, u16 reg, u32 len, u32 *val)
  *
  * Return: 0 if successful, error code otherwise.
  */
-static int genx320_write_reg(struct genx320 *genx320, u16 reg, const u32 val)
+static int genx320_write(struct genx320 *genx320, u32 reg, const u32 val)
 {
 	struct i2c_client *client = v4l2_get_subdevdata(&genx320->sd);
 	struct i2c_msg xfer = {0};
-	u8 buf[sizeof(reg) + sizeof(val)] = {0};
-    u16 *regp = (u16 *)&buf[0];
-    u32 *valp = (u32 *)&buf[2];
+	u8 buf[2 + 4] = {0};
+	u16 *regp = (u16 *)&buf[0];
+	u32 *valp = (u32 *)&buf[2];
 	int ret;
 
 	xfer.addr = client->addr;
-	*regp = cpu_to_be16(reg);
+	*regp = cpu_to_be16((u16)reg);
 	*valp = cpu_to_be32(val);
 
 	xfer.buf = buf;
@@ -163,6 +181,26 @@ static int genx320_write_reg(struct genx320 *genx320, u16 reg, const u32 val)
 	return ret;
 }
 
+static int genx320_set(struct genx320 *genx320, u32 reg, const u32 mask)
+{
+	u32 value;
+
+	RET_ON(genx320_read(genx320, reg, &value));
+	value |= mask;
+	RET_ON(genx320_write(genx320, reg, value));
+	return 0;
+}
+
+static int genx320_clear(struct genx320 *genx320, u32 reg, const u32 mask)
+{
+	u32 value;
+
+	RET_ON(genx320_read(genx320, reg, &value));
+	value &= ~(mask);
+	RET_ON(genx320_write(genx320, reg, value));
+	return 0;
+}
+
 /**
  * genx320_enum_mbus_code() - Enumerate V4L2 sub-device mbus codes
  * @sd: pointer to genx320 V4L2 sub-device structure
@@ -172,8 +210,8 @@ static int genx320_write_reg(struct genx320 *genx320, u16 reg, const u32 val)
  * Return: 0 if successful, error code otherwise.
  */
 static int genx320_enum_mbus_code(struct v4l2_subdev *sd,
-				 struct v4l2_subdev_state *sd_state,
-				 struct v4l2_subdev_mbus_code_enum *code)
+				  struct v4l2_subdev_state *sd_state,
+				  struct v4l2_subdev_mbus_code_enum *code)
 {
 	if (code->index >= ARRAY_SIZE(supported_formats))
 		return -EINVAL;
@@ -192,8 +230,8 @@ static int genx320_enum_mbus_code(struct v4l2_subdev *sd,
  * Return: 0 if successful, error code otherwise.
  */
 static int genx320_enum_frame_size(struct v4l2_subdev *sd,
-				  struct v4l2_subdev_state *sd_state,
-				  struct v4l2_subdev_frame_size_enum *fsize)
+				   struct v4l2_subdev_state *sd_state,
+				   struct v4l2_subdev_frame_size_enum *fsize)
 {
 	if (fsize->index != 0)
 		return -EINVAL;
@@ -214,8 +252,8 @@ static int genx320_enum_frame_size(struct v4l2_subdev *sd,
  * @fmt: V4L2 sub-device format need to be filled
  */
 static void genx320_fill_pad_format(struct genx320 *genx320,
-				   u32 code,
-				   struct v4l2_subdev_format *fmt)
+				    u32 code,
+				    struct v4l2_subdev_format *fmt)
 {
 	fmt->format.width = GENX320_PIXEL_ARRAY_WIDTH;
 	fmt->format.height = GENX320_PIXEL_ARRAY_HEIGHT;
@@ -236,8 +274,8 @@ static void genx320_fill_pad_format(struct genx320 *genx320,
  * Return: 0 if successful, error code otherwise.
  */
 static int genx320_get_pad_format(struct v4l2_subdev *sd,
-				 struct v4l2_subdev_state *sd_state,
-				 struct v4l2_subdev_format *fmt)
+				  struct v4l2_subdev_state *sd_state,
+				  struct v4l2_subdev_format *fmt)
 {
 	struct genx320 *genx320 = to_genx320(sd);
 
@@ -266,8 +304,8 @@ static int genx320_get_pad_format(struct v4l2_subdev *sd,
  * Return: 0 if successful, error code otherwise.
  */
 static int genx320_set_pad_format(struct v4l2_subdev *sd,
-				 struct v4l2_subdev_state *sd_state,
-				 struct v4l2_subdev_format *fmt)
+				  struct v4l2_subdev_state *sd_state,
+				  struct v4l2_subdev_format *fmt)
 {
 	struct genx320 *genx320 = to_genx320(sd);
 	u32 code;
@@ -275,7 +313,19 @@ static int genx320_set_pad_format(struct v4l2_subdev *sd,
 
 	mutex_lock(&genx320->mutex);
 
-	code = supported_formats[0];
+	switch (fmt->format.code) {
+	case MEDIA_BUS_FMT_PSEE_EVT3:
+		code = MEDIA_BUS_FMT_PSEE_EVT3;
+		break;
+	case MEDIA_BUS_FMT_PSEE_EVT2:
+		code = MEDIA_BUS_FMT_PSEE_EVT2;
+		break;
+	case MEDIA_BUS_FMT_PSEE_EVT21:
+	case MEDIA_BUS_FMT_PSEE_EVT21ME:
+	default:
+		code = MEDIA_BUS_FMT_PSEE_EVT21;
+		break;
+	}
 	genx320_fill_pad_format(genx320, code, fmt);
 
 	if (fmt->which == V4L2_SUBDEV_FORMAT_TRY) {
@@ -300,15 +350,243 @@ static int genx320_set_pad_format(struct v4l2_subdev *sd,
  * Return: 0 if successful, error code otherwise.
  */
 static int genx320_init_pad_cfg(struct v4l2_subdev *sd,
-			       struct v4l2_subdev_state *sd_state)
+				struct v4l2_subdev_state *sd_state)
 {
 	struct genx320 *genx320 = to_genx320(sd);
 	struct v4l2_subdev_format fmt = { 0 };
 
 	fmt.which = sd_state ? V4L2_SUBDEV_FORMAT_TRY : V4L2_SUBDEV_FORMAT_ACTIVE;
-	genx320_fill_pad_format(genx320, supported_formats[0], &fmt);
+	genx320_fill_pad_format(genx320, genx320->format_code, &fmt);
 
 	return genx320_set_pad_format(sd, sd_state, &fmt);
+}
+
+/**
+ * genx320_reconfigure_csi2_freq() - Reconfigure the clock tree for the selected CSI-2 freq
+ * @genx320: pointer to genx320 device
+ *
+ * Return: 0 if successful, error code otherwise.
+ */
+static  __maybe_unused int genx320_reconfigure_csi2_freq(struct genx320 *genx320)
+{
+	sys_clk_ctrl sys_clk_ctrl;
+
+	// pll_powerdown_and_switch
+	RET_ON(genx320_read(genx320, sys_clk_ctrl_address, &sys_clk_ctrl.raw));
+
+	sys_clk_ctrl.sys_clk_en = 1;
+	sys_clk_ctrl.sys_clk_switch = 0;
+	RET_ON(genx320_write(genx320, sys_clk_ctrl_address, sys_clk_ctrl.raw));
+
+	sys_clk_ctrl.sys_clk_en = 0;
+	sys_clk_ctrl.sys_clk_switch = 0;
+
+	RET_ON(genx320_write(genx320, sys_clk_ctrl_address, sys_clk_ctrl.raw));
+	RET_ON(genx320_write(genx320, pll_ctrl_address, 1));
+
+	//  set_sensor_clk_freq
+	return 0;
+}
+
+
+/**
+ * genx320_apply_format() - Set the sensor to output the selected format
+ * @genx320: pointer to genx320 device
+ *
+ * Return: 0 if successful, error code otherwise.
+ */
+static int genx320_apply_format(struct genx320 *genx320)
+{
+	edf_pipeline_control edf_pipeline_control;
+	edf_control edf_control = {
+		.raw = 0
+	};
+
+	switch (genx320->format_code) {
+	case MEDIA_BUS_FMT_PSEE_EVT2:
+		edf_control.format = 0;
+		break;
+	case MEDIA_BUS_FMT_PSEE_EVT3:
+		edf_control.format = 1;
+		break;
+	case MEDIA_BUS_FMT_PSEE_EVT21:
+		edf_control.format = 2;
+		break;
+	default:
+		return -EINVAL;
+	}
+#ifdef __BIG_ENDIAN
+	edf_control.endianness = 1;
+#endif
+	RET_ON(genx320_write(genx320, edf_control_address, edf_control.raw));
+
+	RET_ON(genx320_read(genx320, edf_pipeline_control_address, &edf_pipeline_control.raw));
+	edf_pipeline_control.enable = 1;
+	edf_pipeline_control.bypass = genx320->format_code == MEDIA_BUS_FMT_PSEE_EVT21;
+	RET_ON(genx320_write(genx320, edf_pipeline_control_address, edf_pipeline_control.raw));
+	return 0;
+}
+
+/**
+ * genx320_check_boot() - Check the boot magic
+ * @genx320: pointer to the genx320 device
+ *
+ * There is a misc register switching to a magic value at the end of sensor boot process
+ * It should be covered by the wait time given by Prophesee, thus this is just a sanity check
+ */
+static int genx320_check_boot(struct genx320 *genx320)
+{
+	int ret;
+	u32 val;
+
+	ret = genx320_read(genx320, GENX320_MBX_MISC, &val);
+	if (ret) {
+		dev_warn(genx320->dev, "could not get the boot magic");
+		return ret;
+	}
+
+	if (val != GENX320_BOOT_MAGIC) {
+		dev_warn(genx320->dev, "unexpected boot magic, got %u, expected %u",
+			 val, GENX320_BOOT_MAGIC);
+		return -ENXIO;
+	}
+
+	return 0;
+}
+
+static __maybe_unused int genx320_soft_reset(struct genx320 *genx320)
+{
+	// dig_soft_reset
+	RET_ON(genx320_set(genx320, dig_soft_reset_address, 0x1));
+	// mbx/cpu_soft_rest
+	RET_ON(genx320_set(genx320, mbx_cpu_soft_reset_address, 0x1));
+	msleep(10);
+	// mbx/cpu_soft_rest
+	RET_ON(genx320_clear(genx320, mbx_cpu_soft_reset_address, 0x1));
+	msleep(10);
+	return genx320_check_boot(genx320);
+}
+
+/**
+ * genx320_set_mipi_packet_config() - Reconfigure the MIPI frame/packet
+ * configuration in variable mode.
+ * @genx320: pointer to genx320 device
+ *
+ * Return: 0 if successful, error code otherwise.
+ */
+static int genx320_set_mipi_packet_config(struct genx320 *genx320)
+{
+	mipi_csi_ctrl mipi_csi_ctrl;
+	mipi_csi_frame_ctrl mipi_csi_frame_ctrl;
+	edf_output_interface_control edf_output_interface_control;
+	edf_external_output_adapter edf_external_output_adapter;
+	sram_initn sram_initn;
+	sram_pd1 sram_pd1;
+
+	RET_ON(genx320_read(genx320, mipi_csi_frame_ctrl_address, &mipi_csi_frame_ctrl.raw));
+	mipi_csi_frame_ctrl.pkt_timeout_en = 0;
+	mipi_csi_frame_ctrl.pkt_fix_rate_en = 0;
+	mipi_csi_frame_ctrl.pkt_fix_size_en = 0;
+	mipi_csi_frame_ctrl.frame_fix_rate_en = 0;
+	mipi_csi_frame_ctrl.frame_fix_size_en = 0;
+	mipi_csi_frame_ctrl.fix_rate_empty_pkt = 0;
+	RET_ON(genx320_write(genx320, mipi_csi_frame_ctrl_address, mipi_csi_frame_ctrl.raw));
+
+	RET_ON(genx320_read(genx320, mipi_csi_ctrl_address, &mipi_csi_ctrl.raw));
+	mipi_csi_ctrl.pkt_size = 0x1000;
+	RET_ON(genx320_write(genx320, mipi_csi_ctrl_address, mipi_csi_ctrl.raw));
+
+	RET_ON(genx320_read(genx320, edf_output_interface_control_address,
+			    &edf_output_interface_control.raw));
+
+	edf_output_interface_control.start_of_frame_timeout = 0x271;
+
+	RET_ON(genx320_write(genx320, edf_output_interface_control_address,
+			     edf_output_interface_control.raw));
+
+	RET_ON(genx320_read(genx320, edf_external_output_adapter_address,
+			    &edf_external_output_adapter.raw));
+
+	edf_external_output_adapter.qos_timeout = 0xFFFF;
+	edf_external_output_adapter.atomic_qos_mode = 0;
+
+	RET_ON(genx320_write(genx320, edf_external_output_adapter_address,
+			     edf_external_output_adapter.raw));
+
+	RET_ON(genx320_read(genx320, sram_initn_address, &sram_initn.raw));
+	sram_initn.mipi_initn = 1;
+	RET_ON(genx320_write(genx320, sram_initn_address, sram_initn.raw));
+
+	RET_ON(genx320_read(genx320, sram_pd1_address, &sram_pd1.raw));
+	sram_pd1.mipi_pd = 0;
+	RET_ON(genx320_write(genx320, sram_pd1_address, sram_pd1.raw));
+
+	mipi_csi_ctrl.enable = 1;
+	RET_ON(genx320_write(genx320, mipi_csi_ctrl_address, mipi_csi_ctrl.raw));
+
+	RET_ON(genx320_write(genx320, 0x0000B024, 0x80003E80));
+
+	return 0;
+}
+
+/**
+ * genx320_tune_analog() - Update factory settings
+ * @genx320: pointer to genx320 device
+ *
+ * Return: 0 if successful, error code otherwise.
+ */
+static int genx320_tune_analog(struct genx320 *genx320)
+{
+	bgen bias_value = { .raw = 0 };
+	bgen_ctrl bgen_ctrl = { .raw = 0 };
+
+	bgen_ctrl.bias_rstn_hv = 1;
+	bgen_ctrl.bias_rstn_lv = 1;
+	RET_ON(genx320_set(genx320, bgen_ctrl_address, bgen_ctrl.raw));
+	usleep_range(200, 250);
+
+	// configure bias_diff on and off as vdac type biases
+	bias_value.ibtype_sel = 1;
+	RET_ON(genx320_clear(genx320, BIAS_DIFF_ON_LV0, bias_value.raw));
+	RET_ON(genx320_clear(genx320, BIAS_DIFF_OFF_LV0, bias_value.raw));
+
+	// set the post reset bias configuration
+	RET_ON(genx320_write(genx320, BIAS_PR_HV0, 0x0301003D));
+	RET_ON(genx320_write(genx320, BIAS_FO_HV0, 0x03010022));
+	RET_ON(genx320_write(genx320, BIAS_FES_HV0, 0x0101003F));
+	RET_ON(genx320_write(genx320, BIAS_HPF_LV0, 0x03010028));
+	RET_ON(genx320_write(genx320, BIAS_DIFF_ON_LV0, 0x01010019));
+	RET_ON(genx320_write(genx320, BIAS_DIFF_LV0, 0x01010033));
+	RET_ON(genx320_write(genx320, BIAS_DIFF_OFF_LV0, 0x0101001C));
+	RET_ON(genx320_write(genx320, BIAS_INV_LV0, 0x01010039));
+	RET_ON(genx320_write(genx320, BIAS_REFR_LV0, 0x0309000A));
+	RET_ON(genx320_write(genx320, BIAS_INVP_LV0, 0x03010038));
+	RET_ON(genx320_write(genx320, BIAS_REQ_PU_LV0, 0x03000074));
+	RET_ON(genx320_write(genx320, BIAS_SM_PDY_LV0, 0x010000A4));
+
+	bgen_ctrl.burst_transfer_hv_bank_0 = 1;
+	bgen_ctrl.burst_transfer_lv_bank_0 = 1;
+	return genx320_write(genx320, bgen_ctrl_address, bgen_ctrl.raw);
+}
+
+/**
+ * genx320_init() - Set sensor ready to stream
+ * @genx320: pointer to genx320 device
+ *
+ * Return: 0 if successful, error code otherwise.
+ */
+static int genx320_init(struct genx320 *genx320)
+{
+	mipi_csi_stat_ctrl mipi_csi_stat_ctrl;
+	// enable MIPI statistics
+	RET_ON(genx320_read(genx320, mipi_csi_stat_ctrl_address, &mipi_csi_stat_ctrl.raw));
+	mipi_csi_stat_ctrl.enable = 1;
+	RET_ON(genx320_write(genx320, mipi_csi_stat_ctrl_address, mipi_csi_stat_ctrl.raw));
+
+	RET_ON(genx320_set_mipi_packet_config(genx320));
+	RET_ON(genx320_apply_format(genx320));
+	RET_ON(genx320_tune_analog(genx320));
+	return 0;
 }
 
 /**
@@ -319,6 +597,36 @@ static int genx320_init_pad_cfg(struct v4l2_subdev *sd,
  */
 static int genx320_start_streaming(struct genx320 *genx320)
 {
+	roi_ctrl roi_ctrl;
+	ro_td_ctrl ro_td_ctrl;
+	mipi_csi_ctrl mipi_csi_ctrl;
+	ro_lp_ctrl ro_lp_ctrl;
+	ro_time_base_ctrl ro_time_base_ctrl;
+
+	RET_ON(genx320_read(genx320, mipi_csi_ctrl_address, &mipi_csi_ctrl.raw));
+	mipi_csi_ctrl.enable = 1;
+	RET_ON(genx320_write(genx320, mipi_csi_ctrl_address, mipi_csi_ctrl.raw));
+
+	RET_ON(genx320_read(genx320, ro_lp_ctrl_address, &ro_lp_ctrl.raw));
+	ro_lp_ctrl.lp_output_disable = 0;
+	RET_ON(genx320_write(genx320, ro_lp_ctrl_address, ro_lp_ctrl.raw));
+
+	RET_ON(genx320_read(genx320, ro_time_base_ctrl_address, &ro_time_base_ctrl.raw));
+	ro_time_base_ctrl.time_base_enable = 1;
+	RET_ON(genx320_write(genx320, ro_time_base_ctrl_address, ro_time_base_ctrl.raw));
+
+	RET_ON(genx320_read(genx320, ro_td_ctrl_address, &ro_td_ctrl.raw));
+	ro_td_ctrl.ro_td_ack_y_rstn = 1;
+	ro_td_ctrl.ro_td_arb_y_rstn = 1;
+	ro_td_ctrl.ro_td_addr_y_rstn = 1;
+	ro_td_ctrl.ro_td_sendreq_y_rstn = 1;
+	RET_ON(genx320_write(genx320, ro_td_ctrl_address, ro_td_ctrl.raw));
+
+	RET_ON(genx320_read(genx320, roi_ctrl_address, &roi_ctrl.raw));
+	roi_ctrl.px_sw_rstn = 1;
+	roi_ctrl.roi_td_en = 1;
+	RET_ON(genx320_write(genx320, roi_ctrl_address, roi_ctrl.raw));
+
 	return 0;
 }
 
@@ -330,6 +638,39 @@ static int genx320_start_streaming(struct genx320 *genx320)
  */
 static int genx320_stop_streaming(struct genx320 *genx320)
 {
+	roi_ctrl roi_ctrl;
+	ro_td_ctrl ro_td_ctrl;
+	ro_lp_ctrl ro_lp_ctrl;
+	ro_time_base_ctrl ro_time_base_ctrl;
+	mipi_csi_ctrl mipi_csi_ctrl;
+
+	RET_ON(genx320_read(genx320, roi_ctrl_address, &roi_ctrl.raw));
+	roi_ctrl.px_sw_rstn = 0;
+	RET_ON(genx320_write(genx320, roi_ctrl_address, roi_ctrl.raw));
+
+	RET_ON(genx320_read(genx320, ro_td_ctrl_address, &ro_td_ctrl.raw));
+	ro_td_ctrl.ro_td_ack_y_rstn = 0;
+	ro_td_ctrl.ro_td_arb_y_rstn = 0;
+	ro_td_ctrl.ro_td_addr_y_rstn = 0;
+	ro_td_ctrl.ro_td_sendreq_y_rstn = 0;
+	RET_ON(genx320_write(genx320, ro_td_ctrl_address, ro_td_ctrl.raw));
+
+	RET_ON(genx320_read(genx320, ro_lp_ctrl_address, &ro_lp_ctrl.raw));
+	ro_lp_ctrl.lp_output_disable = 1;
+	ro_lp_ctrl.lp_keep_th = 0;
+	RET_ON(genx320_write(genx320, ro_lp_ctrl_address, ro_lp_ctrl.raw));
+
+	msleep(1);
+
+	// genx320_write(genx320, 0x9008, 0x00000194);
+	RET_ON(genx320_read(genx320, ro_time_base_ctrl_address, &ro_time_base_ctrl.raw));
+	ro_time_base_ctrl.time_base_enable = 0;
+	RET_ON(genx320_write(genx320, ro_time_base_ctrl_address, ro_time_base_ctrl.raw));
+
+	RET_ON(genx320_read(genx320, mipi_csi_ctrl_address, &mipi_csi_ctrl.raw));
+	mipi_csi_ctrl.enable = 0;
+	RET_ON(genx320_write(genx320, mipi_csi_ctrl_address, mipi_csi_ctrl.raw));
+
 	return 0;
 }
 
@@ -354,7 +695,7 @@ static int genx320_set_stream(struct v4l2_subdev *sd, int enable)
 
 	if (enable) {
 		ret = pm_runtime_resume_and_get(genx320->dev);
-		if (ret)
+		if (ret < 0)
 			goto error_unlock;
 
 		ret = genx320_start_streaming(genx320);
@@ -390,7 +731,7 @@ static int genx320_detect(struct genx320 *genx320)
 	int ret;
 	u32 val;
 
-	ret = genx320_read_reg(genx320, GENX320_CHIP_ID, 1, &val);
+	ret = genx320_read(genx320, GENX320_CHIP_ID, &val);
 	if (ret)
 		return ret;
 
@@ -425,7 +766,7 @@ static int genx320_parse_hw_config(struct genx320 *genx320)
 
 	/* Request optional reset pin */
 	genx320->nreset_gpio = devm_gpiod_get_optional(genx320->dev, "nreset",
-						     GPIOD_OUT_LOW);
+						       GPIOD_OUT_LOW);
 	if (IS_ERR(genx320->nreset_gpio)) {
 		dev_err(genx320->dev, "failed to get reset gpio %ld",
 			PTR_ERR(genx320->nreset_gpio));
@@ -497,6 +838,32 @@ done_endpoint_free:
 	return ret;
 }
 
+static int genx320_log_status(struct v4l2_subdev *sd)
+{
+	u32 val;
+	struct genx320 *genx320 = to_genx320(sd);
+	struct device *dev = genx320->dev;
+
+	dev_info(dev, "******* MIPI_CSI STATUS ********");
+	RET_ON(genx320_read(genx320, mipi_csi_stat_frame_cnt_address, &val));
+	dev_info(dev, "Frame Count: %u", val);
+
+	RET_ON(genx320_read(genx320, mipi_csi_stat_byte_cnt_address, &val));
+	dev_info(dev, "Byte Count: %u", val);
+
+	RET_ON(genx320_read(genx320, mipi_csi_stat_pad_cnt_address, &val));
+	dev_info(dev, "Pad Count: %u", val);
+
+	RET_ON(genx320_read(genx320, mipi_csi_stat_pkt_cnt_address, &val));
+	dev_info(dev, "Packet Count: %u", val);
+
+	RET_ON(genx320_read(genx320, mipi_csi_stat_inc_pkt_cnt_address, &val));
+	dev_info(dev, "Incomplete Packet Count: %u", val);
+
+	RET_ON(genx320_read(genx320, mipi_csi_stat_frame_period_address, &val));
+	dev_info(dev, "Frame Period: %u", val);
+	return 0;
+}
 #ifdef CONFIG_VIDEO_ADV_DEBUG
 static int genx320_g_register(struct v4l2_subdev *sd, struct v4l2_dbg_register *reg)
 {
@@ -507,7 +874,7 @@ static int genx320_g_register(struct v4l2_subdev *sd, struct v4l2_dbg_register *
 	if ((reg->reg % 4) || reg->reg > 0xFFF0)
 		return -EINVAL;
 
-	ret = genx320_read_reg(genx320, (u16)reg->reg, 1, &val);
+	ret = genx320_read(genx320, (u16)reg->reg, &val);
 	reg->val = val;
 	reg->size = 4;
 
@@ -521,7 +888,7 @@ static int genx320_s_register(struct v4l2_subdev *sd, const struct v4l2_dbg_regi
 	if ((reg->reg % 4) || reg->reg > 0xFFF0)
 		return -EINVAL;
 
-	return genx320_write_reg(genx320, (u16)reg->reg, (u32)reg->val);
+	return genx320_write(genx320, (u16)reg->reg, (u32)reg->val);
 }
 #endif /* def CONFIG_VIDEO_ADV_DEBUG */
 
@@ -531,6 +898,7 @@ static const struct v4l2_subdev_video_ops genx320_video_ops = {
 };
 
 static const struct v4l2_subdev_core_ops genx320_core_ops = {
+	.log_status = genx320_log_status,
 #ifdef CONFIG_VIDEO_ADV_DEBUG
 	.g_register = genx320_g_register,
 	.s_register = genx320_s_register,
@@ -552,26 +920,6 @@ static const struct v4l2_subdev_ops genx320_subdev_ops = {
 };
 
 /**
- * genx320_check_boot() - Check the boot magic
- * @genx320: pointer to the genx320 device
- *
- * There is a misc register switching to a magic value at the end of sensor boot process
- * It should be covered by the wait time given by Prophesee, thus this is just a sanity check
- */
-static void genx320_check_boot(struct genx320 *genx320)
-{
-	int ret;
-	u32 val;
-
-	ret = genx320_read_reg(genx320, GENX320_MBX_MISC, 1, &val);
-	if (ret)
-		dev_warn(genx320->dev, "could not get the boot magic");
-	if (val != GENX320_BOOT_MAGIC)
-		dev_warn(genx320->dev, "unexpected boot magic, got %u, expected %u",
-			val, GENX320_BOOT_MAGIC);
-}
-
-/**
  * genx320_power_on() - Sensor power on sequence
  * @dev: pointer to i2c device
  *
@@ -590,7 +938,6 @@ static int genx320_power_on(struct device *dev)
 		return ret;
 	}
 
-
 	ret = clk_prepare_enable(genx320->inclk);
 	if (ret) {
 		dev_err(genx320->dev, "fail to enable inclk");
@@ -604,7 +951,17 @@ static int genx320_power_on(struct device *dev)
 	/* Tstart = 15ms (min) */
 	/* but CCAM5 introduces 48ms +/-15% delay */
 	msleep_interruptible(15 + 55);
-	genx320_check_boot(genx320);
+	ret = genx320_check_boot(genx320);
+	if (ret) {
+		dev_err(genx320->dev, "fail to boot sensor");
+		goto error_reset;
+	}
+
+	ret = genx320_init(genx320);
+	if (ret) {
+		dev_err(genx320->dev, "fail to initialize sensor");
+		goto error_reset;
+	}
 
 	return 0;
 
@@ -674,6 +1031,9 @@ static int genx320_probe(struct i2c_client *client)
 
 	mutex_init(&genx320->mutex);
 
+	/* Set default output format */
+	genx320->format_code = supported_formats[1];
+
 	ret = genx320_power_on(genx320->dev);
 	if (ret) {
 		dev_err(genx320->dev, "failed to power-on the sensor");
@@ -687,8 +1047,6 @@ static int genx320_probe(struct i2c_client *client)
 		goto error_power_off;
 	}
 
-	/* Set default output format */
-	genx320->format_code = supported_formats[0];
 
 	/* Initialize subdev */
 	genx320->sd.flags |= V4L2_SUBDEV_FL_HAS_DEVNODE;
