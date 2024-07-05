@@ -553,11 +553,6 @@ static int imx636_set_pad_format(struct v4l2_subdev *sd,
 
 	mutex_lock(&imx636->mutex);
 
-	if (imx636->streaming) {
-		mutex_unlock(&imx636->mutex);
-		return -EBUSY;
-	}
-
 	switch (fmt->format.code) {
 	case MEDIA_BUS_FMT_PSEE_EVT21:
 	case MEDIA_BUS_FMT_PSEE_EVT21ME:
@@ -580,6 +575,9 @@ static int imx636_set_pad_format(struct v4l2_subdev *sd,
 
 		framefmt = v4l2_subdev_get_try_format(sd, sd_state, fmt->pad);
 		*framefmt = fmt->format;
+	} else if (imx636->streaming) {
+		/* The output format can't be changed while streaming */
+		ret = -EBUSY;
 	} else {
 		/* There is actually a race condition here: if someone is enabling the sensor, and
 		 * set_pad_format happens after the init (which takes imx636->mutex) but before
