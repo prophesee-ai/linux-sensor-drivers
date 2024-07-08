@@ -4,7 +4,6 @@
  *
  * Copyright (C) 2023 Prophesee
  */
-#include <asm/unaligned.h>
 
 #include <linux/clk.h>
 #include <linux/delay.h>
@@ -20,6 +19,7 @@
 #include "genx320_controls.h"
 #include "genx320.h"
 #include "drivers/genx320/genx320_registers.h"
+#include "psee-format.h"
 
 #define GENX320_PIXEL_ARRAY_WIDTH 320U
 #define GENX320_PIXEL_ARRAY_HEIGHT 320U
@@ -542,7 +542,6 @@ static int genx320_init(struct genx320 *genx320)
 static int genx320_start_streaming(struct genx320 *genx320)
 {
 	struct psee_v4l2_ctrl_wrapper *pcw = &genx320->pcw;
-	struct core_config *config = &pcw->controls.core;
 	int ret = 0;
 
 
@@ -1024,10 +1023,8 @@ error_mutex_destroy:
 /**
  * genx320_remove() - I2C client device unbinding
  * @client: pointer to I2C client device
- *
- * Return: 0 if successful, error code otherwise.
  */
-static int genx320_remove(struct i2c_client *client)
+static void genx320_remove(struct i2c_client *client)
 {
 	struct v4l2_subdev *sd = i2c_get_clientdata(client);
 	struct genx320 *genx320 = to_genx320(sd);
@@ -1042,7 +1039,6 @@ static int genx320_remove(struct i2c_client *client)
 	pm_runtime_set_suspended(&client->dev);
 
 	mutex_destroy(&genx320->mutex);
-	return 0;
 }
 
 static const struct dev_pm_ops genx320_pm_ops = {
@@ -1057,7 +1053,7 @@ static const struct of_device_id genx320_of_match[] = {
 MODULE_DEVICE_TABLE(of, genx320_of_match);
 
 static struct i2c_driver genx320_driver = {
-	.probe_new = genx320_probe,
+	.probe = genx320_probe,
 	.remove = genx320_remove,
 	.driver = {
 		.name = "genx320",

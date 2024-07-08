@@ -10,17 +10,14 @@
 
 /**
  * struct genx320 - genx320 sensor device structure
- * @dev: Pointer to generic device
- * @client: Pointer to i2c client
- * @sd: V4L2 sub-device
  * @pad: Media pad. Only one pad supported
  * @nreset_gpio: Sensor RSTn gpio
  * @inclk: Sensor input clock
  * @supplies: Regulator supplies
  * @mutex: Mutex for serializing sensor controls
+ * @pcw: wrapper for V4L2 operations
  * @link_freq: frequency of the CSI-2 clock lane
  * @format_code: Media-ctl code of the output format
- * @streaming: Flag indicating streaming state
  */
 
 struct genx320 {

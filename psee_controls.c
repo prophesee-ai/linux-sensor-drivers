@@ -112,7 +112,7 @@ static const struct v4l2_ctrl_ops stream_src_ctrl_ops = {
 	.s_ctrl = stream_src_s_ctrl,
 };
 
-static bool roi_ctrl_equal(const struct v4l2_ctrl *ctrl, u32 idx,
+static bool roi_ctrl_equal(const struct v4l2_ctrl *ctrl,
 			   union v4l2_ctrl_ptr ptr1,
 			   union v4l2_ctrl_ptr ptr2)
 {
@@ -149,8 +149,7 @@ static void roi_ctrl_log(const struct v4l2_ctrl *ctrl)
 	// TODO: how to log ?&
 }
 
-static int roi_ctrl_validate(const struct v4l2_ctrl *ctrl, u32 idx,
-			     union v4l2_ctrl_ptr ptr)
+static int roi_ctrl_validate(const struct v4l2_ctrl *ctrl, union v4l2_ctrl_ptr ptr)
 {
 	struct roi_set *roi_set = (struct roi_set *)ctrl->p_new.p;
 	int i;
@@ -174,7 +173,7 @@ static const struct v4l2_ctrl_type_ops roi_type_ops = {
 	.validate = roi_ctrl_validate,
 };
 
-static bool roi_pixel_ctrl_equal(const struct v4l2_ctrl *ctrl, u32 idx,
+static bool roi_pixel_ctrl_equal(const struct v4l2_ctrl *ctrl,
 				 union v4l2_ctrl_ptr ptr1,
 				 union v4l2_ctrl_ptr ptr2)
 {
@@ -216,8 +215,7 @@ static void roi_pixel_ctrl_log(const struct v4l2_ctrl *ctrl)
 	// TODO: how to log ?&
 }
 
-static int roi_pixel_ctrl_validate(const struct v4l2_ctrl *ctrl, u32 idx,
-				   union v4l2_ctrl_ptr ptr)
+static int roi_pixel_ctrl_validate(const struct v4l2_ctrl *ctrl, union v4l2_ctrl_ptr ptr)
 {
 	struct psee_v4l2_ctrl_wrapper *pcw = ctrl_to_pcw(ctrl);
 	struct grid *grid = (struct grid *)ctrl->p_new.p;
