@@ -1762,10 +1762,8 @@ error_enable_power:
 /**
  * imx636_remove() - I2C client device unbinding
  * @client: pointer to I2C client device
- *
- * Return: 0 if successful, error code otherwise.
  */
-static int imx636_remove(struct i2c_client *client)
+static void imx636_remove(struct i2c_client *client)
 {
 	struct v4l2_subdev *sd = i2c_get_clientdata(client);
 	struct imx636 *imx636 = to_imx636(sd);
@@ -1780,7 +1778,6 @@ static int imx636_remove(struct i2c_client *client)
 	pm_runtime_set_suspended(&client->dev);
 
 	mutex_destroy(&imx636->mutex);
-	return 0;
 }
 
 static const struct dev_pm_ops imx636_pm_ops = {
@@ -1795,7 +1792,7 @@ static const struct of_device_id imx636_of_match[] = {
 MODULE_DEVICE_TABLE(of, imx636_of_match);
 
 static struct i2c_driver imx636_driver = {
-	.probe_new = imx636_probe,
+	.probe = imx636_probe,
 	.remove = imx636_remove,
 	.driver = {
 		.name = "imx636",
