@@ -73,13 +73,23 @@ union bgen {
 		u32 scr_set    :1; /* */
 		u32 unused2    :2;
 		u32 single     :1; /* 1: update the hardware immediately */
-		u32 unused4    :4;
+		u32 unused3    :3;
 	};
 	u32 raw;
 };
 
+/* BIAS bgen0_01 */
+#define IMX636_BIAS_FO (BIAS_BASE + 0x004)
+/* BIAS bgen0_03 */
+#define IMX636_BIAS_HPF (BIAS_BASE + 0x00C)
+/* BIAS bgen0_04 */
+#define IMX636_BIAS_DIFF_ON (BIAS_BASE + 0x010)
 /* BIAS bgen0_05 */
 #define IMX636_BIAS_DIFF (BIAS_BASE + 0x014)
+/* BIAS bgen0_06 */
+#define IMX636_BIAS_DIFF_OFF (BIAS_BASE + 0x018)
+/* BIAS bgen0_08 */
+#define IMX636_BIAS_REFR (BIAS_BASE + 0x020)
 
 /* EDF registers */
 #define EDF_BASE 0x7000
@@ -239,6 +249,8 @@ static const struct link_timing {
  * @link_timing: Pointer to pre-computed timing for the CSI-2 link
  * @format_code: Media-ctl code of the output format
  * @streaming: Flag indicating streaming state
+ * @initialized: Flag to know if controls may be applied
+ * @ctrls: structure holding the V4L2 controls
  */
 struct imx636 {
 	struct device *dev;
@@ -252,6 +264,8 @@ struct imx636 {
 	const struct link_timing *timings;
 	u32 format_code;
 	bool streaming;
+	bool initialized;
+	struct v4l2_ctrl_handler ctrls;
 };
 
 /**
@@ -579,16 +593,8 @@ static int imx636_set_pad_format(struct v4l2_subdev *sd,
 		/* The output format can't be changed while streaming */
 		ret = -EBUSY;
 	} else {
-		/* There is actually a race condition here: if someone is enabling the sensor, and
-		 * set_pad_format happens after the init (which takes imx636->mutex) but before
-		 * pm state switches from RPM_RESUMING to RPM_ACTIVE, the format change won't be
-		 * done on the Event Data Formater, and the pm_state is not completely locked while
-		 * we read it.
-		 * locking the pm_state is not an option as it may result in an interlock.
-		 * A try_lock may be considered though.
-		 */
 		/* Directly apply the format if the sensor is already initialized */
-		if (pm_runtime_active(imx636->dev))
+		if (imx636->initialized)
 			ret = imx636_apply_format(imx636, code);
 
 		/* Don't update format if the sensor access failed */
@@ -722,26 +728,9 @@ static int imx636_reconfigure_csi2_freq(struct imx636 *imx636)
  */
 static int imx636_tune_analog(struct imx636 *imx636)
 {
-	union bgen bias_diff = { {
-			.idac_ctl = 0x4d,
-			.vdac_ctl = 0x50,
-			.buf_stg = 5,
-			.ibtype_sel = 0,
-			.mux_sel = 0,
-			.mux_en = 1,
-			.vdac_en = 0,
-			.buf_en = 1,
-			.idac_en = 1,
-			.scr_set = 0,
-			.single = 1,
-		} };
-
 	/* Set Pixel monitor reference current control to Pmos leak */
 	/* reason is not documented */
 	RET_ON(imx636_write_reg(imx636, IMX636_SPARE_CTRL0, 0x200));
-	/* Set bias diff 0 idac at 4d */
-	/* datatsheet tell it should be 4D, my part boot with 54 */
-	RET_ON(imx636_write_reg(imx636, IMX636_BIAS_DIFF, bias_diff.raw));
 	/* Disable analog pipeline */
 	/* Analog queueing seems to generate artifacts in some conditions */
 	RET_ON(imx636_clear_reg(imx636, IMX636_RO_CTRL, IMX636_RO_ANALOG_PIPE_EN));
@@ -759,7 +748,20 @@ static int imx636_init(struct imx636 *imx636)
 	RET_ON(imx636_reconfigure_csi2_freq(imx636));
 	RET_ON(imx636_tune_analog(imx636));
 	RET_ON(imx636_apply_format(imx636, imx636->format_code));
+	imx636->initialized = true;
 	return 0;
+}
+
+/**
+ * imx636_deinit() - Put sensor in standby
+ * @imx636: pointer to imx636 device
+ */
+static void imx636_deinit(struct imx636 *imx636)
+{
+	imx636->initialized = false;
+	imx636_write_reg(imx636, IMX636_STANDBY_CTRL, IMX636_STANDBY_VALUE);
+	/* Tstopwait = 15ms (min) */
+	msleep_interruptible(15);
 }
 
 /**
@@ -1144,14 +1146,16 @@ static int imx636_power_on(struct device *dev)
 	if (ret)
 		goto error_init;
 
+	ret = __v4l2_ctrl_handler_setup(imx636->sd.ctrl_handler);
+	if (ret)
+		goto error_v4l2_ctrl_handler_setup;
 	mutex_unlock(&imx636->mutex);
 	return 0;
 
+error_v4l2_ctrl_handler_setup:
 error_init:
 error_checking_boot:
-	imx636_write_reg(imx636, IMX636_STANDBY_CTRL, IMX636_STANDBY_VALUE);
-	/* Tstopwait = 15ms (min) */
-	msleep_interruptible(15);
+	imx636_deinit(imx636);
 	disable_power_and_clock(imx636);
 error_enable_power_and_clock:
 	mutex_unlock(&imx636->mutex);
@@ -1170,13 +1174,202 @@ static int imx636_power_off(struct device *dev)
 	struct imx636 *imx636 = to_imx636(sd);
 
 	mutex_lock(&imx636->mutex);
-	imx636_write_reg(imx636, IMX636_STANDBY_CTRL, IMX636_STANDBY_VALUE);
-	/* Tstopwait = 15ms (min) */
-	msleep_interruptible(15);
+	imx636_deinit(imx636);
 
 	disable_power_and_clock(imx636);
 
 	mutex_unlock(&imx636->mutex);
+	return 0;
+}
+
+/* -----------------------------------------------------------------------------
+ * Bias controls
+ */
+
+#define V4L2_CID_BIAS_BASE (V4L2_CID_USER_BASE | 0x1800)
+#define V4L2_CID_BIAS_FO (V4L2_CID_BIAS_BASE | 0x0)
+#define V4L2_CID_BIAS_HPF (V4L2_CID_BIAS_BASE | 0x1)
+#define V4L2_CID_BIAS_DIFF (V4L2_CID_BIAS_BASE | 0x2)
+#define V4L2_CID_BIAS_DIFF_ON (V4L2_CID_BIAS_BASE | 0x3)
+#define V4L2_CID_BIAS_DIFF_OFF (V4L2_CID_BIAS_BASE | 0x4)
+#define V4L2_CID_BIAS_REFR (V4L2_CID_BIAS_BASE | 0x5)
+
+static u32 bias_cid2addr(u32 v4l2_ctrl_id)
+{
+	switch (v4l2_ctrl_id) {
+	case V4L2_CID_BIAS_FO:
+		return IMX636_BIAS_FO;
+	case V4L2_CID_BIAS_HPF:
+		return IMX636_BIAS_HPF;
+	case V4L2_CID_BIAS_DIFF:
+		return IMX636_BIAS_DIFF;
+	case V4L2_CID_BIAS_DIFF_ON:
+		return IMX636_BIAS_DIFF_ON;
+	case V4L2_CID_BIAS_DIFF_OFF:
+		return IMX636_BIAS_DIFF_OFF;
+	case V4L2_CID_BIAS_REFR:
+		return IMX636_BIAS_REFR;
+	default:
+		/* There should be no way to trigger this, however, if this
+		 * happens, the sensor will generate errors on accesses to this
+		 * address, and won't alter its behavior
+		 */
+		return ~0;
+	}
+}
+
+static const char *bias_cid2name(u32 v4l2_ctrl_id)
+{
+	switch (v4l2_ctrl_id) {
+	case V4L2_CID_BIAS_FO:
+		return "bias_fo";
+	case V4L2_CID_BIAS_HPF:
+		return "bias_hpf";
+	case V4L2_CID_BIAS_DIFF:
+		return "bias_diff";
+	case V4L2_CID_BIAS_DIFF_ON:
+		return "bias_diff_on";
+	case V4L2_CID_BIAS_DIFF_OFF:
+		return "bias_diff_off";
+	case V4L2_CID_BIAS_REFR:
+		return "bias_refr";
+	default:
+		return "bias_driver_error";
+	}
+}
+
+static union bgen bias_cid2cfg(u32 v4l2_ctrl_id)
+{
+	switch (v4l2_ctrl_id) {
+	case V4L2_CID_BIAS_FO:
+		return (union bgen){ {
+			.buf_stg = 1,
+			.mux_en = 1,
+			.buf_en = 1,
+			.idac_en = 1,
+			.scr_set = 1,
+		} };
+	case V4L2_CID_BIAS_HPF:
+		return (union bgen){ {
+			.buf_stg = 1,
+			.mux_en = 1,
+			.buf_en = 1,
+			.idac_en = 1,
+			.scr_set = 1,
+		} };
+	case V4L2_CID_BIAS_DIFF:
+		return (union bgen){ {
+			.buf_stg = 1,
+			.mux_en = 1,
+			.buf_en = 1,
+			.idac_en = 1,
+			.scr_set = 0,
+		} };
+	case V4L2_CID_BIAS_DIFF_ON:
+		return (union bgen){ {
+			.buf_stg = 1,
+			.mux_en = 1,
+			.buf_en = 1,
+			.idac_en = 1,
+			.scr_set = 0,
+		} };
+	case V4L2_CID_BIAS_DIFF_OFF:
+		return (union bgen){ {
+			.buf_stg = 1,
+			.mux_en = 1,
+			.buf_en = 1,
+			.idac_en = 1,
+			.scr_set = 0,
+		} };
+	case V4L2_CID_BIAS_REFR:
+		return (union bgen){ {
+			.buf_stg = 2,
+			.mux_en = 1,
+			.buf_en = 0,
+			.idac_en = 1,
+			.scr_set = 1,
+		} };
+	default:
+		return (union bgen){ .raw = 0 };
+	}
+}
+
+static int bias_s_ctrl(struct v4l2_ctrl *ctrl)
+{
+	struct imx636 *imx636 = ctrl->priv;
+	union bgen bias;
+
+	if (!imx636->initialized)
+		return 0;
+
+	bias = bias_cid2cfg(ctrl->id);
+	bias.idac_ctl = ctrl->val;
+	bias.single = 1;
+	return imx636_write_reg(imx636, bias_cid2addr(ctrl->id), bias.raw);
+}
+
+static const struct v4l2_ctrl_ops bias_ctrl_ops = {
+	.s_ctrl = bias_s_ctrl,
+};
+
+/**
+ * new_bctrl() - Create V4L2 control for one pixel bias
+ * @imx636: pointer to the imx636 device
+ *
+ * \pre the imx636 control handler is initialized
+ * \pre the imx636 is powered so that we can do register accesses
+ *
+ * Return: 0 if successful, error code otherwise.
+ */
+static int new_bctrl(struct imx636 *imx636, u8 def, u8 min, u8 max, u32 id)
+{
+	int ret = 0;
+	struct v4l2_ctrl_config cfg = {
+		.ops = &bias_ctrl_ops,
+		.id = id,
+		.name = bias_cid2name(id),
+		.type = V4L2_CTRL_TYPE_INTEGER,
+		.min = min,
+		.max = max,
+		.step = 1,
+	};
+
+	/* Some biases are trimmed, fetch their value on the sensor */
+	if ((def >= min) && (def <= max)) {
+		cfg.def = def;
+	} else {
+		union bgen bias;
+
+		ret = imx636_read_reg(imx636, bias_cid2addr(id), 1, &bias.raw);
+		cfg.def = bias.idac_ctl;
+	}
+
+	if (!ret) {
+		/* Register the control */
+		/* Drop the returned pointer, it's just for the user */
+		v4l2_ctrl_new_custom(imx636->sd.ctrl_handler, &cfg, imx636);
+		ret = imx636->sd.ctrl_handler->error;
+	}
+	return ret;
+}
+
+/**
+ * create_bias_controls() - Create V4L2 control for the pixel biases
+ * @imx636: pointer to the imx636 device with an initialized control handler
+ *
+ * Return: 0 if successful, error code otherwise.
+ */
+static int create_bias_controls(struct imx636 *imx636)
+{
+	/* Ordered as in the IMX636 App Note */
+	/* For trimmed value, set default outside [min,max] range */
+	/* Register values for:   def,  min,  max */
+	RET_ON(new_bctrl(imx636, 0x00, 0x2D, 0x6E, V4L2_CID_BIAS_FO));
+	RET_ON(new_bctrl(imx636, 0x00, 0x0F, 0xFF, V4L2_CID_BIAS_DIFF_ON));
+	RET_ON(new_bctrl(imx636, 0x54, 0x34, 0x64, V4L2_CID_BIAS_DIFF));
+	RET_ON(new_bctrl(imx636, 0x00, 0x0F, 0xFF, V4L2_CID_BIAS_DIFF_OFF));
+	RET_ON(new_bctrl(imx636, 0x14, 0x00, 0xFF, V4L2_CID_BIAS_REFR));
+	RET_ON(new_bctrl(imx636, 0x00, 0x00, 0x78, V4L2_CID_BIAS_HPF));
 	return 0;
 }
 
@@ -1241,6 +1434,12 @@ static int imx636_probe(struct i2c_client *client)
 		dev_err(imx636->dev, "failed to init entity pads: %d", ret);
 		goto error_init_entity;
 	}
+
+	/* Initialize V4L2 controls */
+	imx636->sd.ctrl_handler = &imx636->ctrls;
+	v4l2_ctrl_handler_init(&imx636->ctrls, 10);
+	imx636->ctrls.lock = &imx636->mutex;
+	create_bias_controls(imx636);
 
 	ret = v4l2_async_register_subdev_sensor(&imx636->sd);
 	if (ret < 0) {
