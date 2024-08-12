@@ -8,6 +8,7 @@
 
 #include <linux/kconfig.h> /* to detect big-endian builds */
 #include <linux/clk.h>
+#include <linux/minmax.h>
 #include <linux/delay.h>
 #include <linux/i2c.h>
 #include <linux/module.h>
@@ -19,8 +20,8 @@
 #include <media/v4l2-subdev.h>
 #include "psee-format.h"
 
-#define IMX636_PIXEL_ARRAY_WIDTH 1280U
-#define IMX636_PIXEL_ARRAY_HEIGHT 720U
+#define PIXEL_ARRAY_WIDTH 1280
+#define PIXEL_ARRAY_HEIGHT 720
 
 #define IMX636_NUM_DATA_LANES 2
 #define IMX636_INCLK_RATE 20000000
@@ -37,11 +38,37 @@
 
 #define IMX636_ROI_CTRL 0x04
 #define IMX636_ROI_PX_TD_RSTN BIT(10)
+union roi_ctrl {
+	struct {
+		u32 unused          :1;
+		u32 roi_td_en       :1; /* enable ROI programming */
+		u32 unused3         :3;
+		u32 shadow_trigger  :1; /* propagate config to analog */
+		u32 roni_n_en       :1; /* 0: RONI mode, 1: ROI mode */
+		u32 unused1         :1;
+		u32 roi_td_scan_en  :1; /* enable scan mode */
+		u32 unused1b        :1;
+		u32 px_td_rstn      :1; /* 0: pixels in reset, 1: active */
+		u32 roi_scan_timer  :7; /* reset dduration for scan mode */
+		u32 unused7         :7;
+		u32 roi_scan_single :1; /* trigger single ROI scan loop */
+		u32 unused2         :2;
+		u32 pix_roi_slope_n :2; /* roi fall time */
+		u32 pix_roi_slope_p :2; /* roi rise time */
+	};
+	u32 raw;
+};
 
 #define IMX636_CHIP_ID 0x14
 #define IMX636_ID 0xA0401806
 
 #define IMX636_SPARE_CTRL0 0x18
+
+#define IMX636_ROI_WIN_CTRL 0x34
+
+#define IMX636_ROI_WIN_START 0x38
+
+#define IMX636_ROI_WIN_END 0x3C
 
 #define IMX636_DV_CTRL 0xB8
 #define IMX636_DV_PC_CLKDIVEN BIT(0)
@@ -90,6 +117,11 @@ union bgen {
 #define IMX636_BIAS_DIFF_OFF (BIAS_BASE + 0x018)
 /* BIAS bgen0_08 */
 #define IMX636_BIAS_REFR (BIAS_BASE + 0x020)
+
+/* ROI registers */
+#define PSEE_ROI_BASE 0x2000
+#define IMX636_ROI_X00 (PSEE_ROI_BASE + 0x0000)
+#define IMX636_ROI_Y00 (PSEE_ROI_BASE + 0x2000)
 
 /* EDF registers */
 #define EDF_BASE 0x7000
@@ -251,6 +283,7 @@ static const struct link_timing {
  * @streaming: Flag indicating streaming state
  * @initialized: Flag to know if controls may be applied
  * @ctrls: structure holding the V4L2 controls
+ * @crop: the rectangle requested as region of interest
  */
 struct imx636 {
 	struct device *dev;
@@ -266,6 +299,7 @@ struct imx636 {
 	bool streaming;
 	bool initialized;
 	struct v4l2_ctrl_handler ctrls;
+	struct v4l2_rect crop;
 };
 
 /**
@@ -439,9 +473,9 @@ static int imx636_enum_frame_size(struct v4l2_subdev *sd,
 	if (fsize->index != 0)
 		return -EINVAL;
 
-	fsize->min_width = IMX636_PIXEL_ARRAY_WIDTH;
+	fsize->min_width = PIXEL_ARRAY_WIDTH;
 	fsize->max_width = fsize->min_width;
-	fsize->min_height = IMX636_PIXEL_ARRAY_HEIGHT;
+	fsize->min_height = PIXEL_ARRAY_HEIGHT;
 	fsize->max_height = fsize->min_height;
 
 	return 0;
@@ -509,8 +543,8 @@ static void imx636_fill_pad_format(struct imx636 *imx636,
 				   u32 code,
 				   struct v4l2_subdev_format *fmt)
 {
-	fmt->format.width = IMX636_PIXEL_ARRAY_WIDTH;
-	fmt->format.height = IMX636_PIXEL_ARRAY_HEIGHT;
+	fmt->format.width = PIXEL_ARRAY_WIDTH;
+	fmt->format.height = PIXEL_ARRAY_HEIGHT;
 	fmt->format.code = code;
 	fmt->format.field = V4L2_FIELD_NONE;
 	fmt->format.colorspace = V4L2_COLORSPACE_RAW;
@@ -621,6 +655,122 @@ static int imx636_init_pad_cfg(struct v4l2_subdev *sd, struct v4l2_subdev_state 
 	fmt.which = V4L2_SUBDEV_FORMAT_TRY;
 	return imx636_set_pad_format(sd, sd_state, &fmt);
 }
+
+static struct v4l2_rect *
+imx636_get_pad_crop(struct imx636 *imx636,
+		      struct v4l2_subdev_state *sd_state,
+		      unsigned int pad, enum v4l2_subdev_format_whence which)
+{
+	switch (which) {
+	case V4L2_SUBDEV_FORMAT_TRY:
+		return v4l2_subdev_get_try_crop(&imx636->sd, sd_state, pad);
+	case V4L2_SUBDEV_FORMAT_ACTIVE:
+		return &imx636->crop;
+	}
+
+	return NULL;
+}
+
+static int imx636_set_roi_rect(struct imx636 *imx636, struct v4l2_rect *roi)
+{
+	int ret = 0;
+	union coordinate {
+		struct {
+			u16 x;
+			u16 y;
+		};
+		u32 raw;
+	} pos;
+	union roi_ctrl roi_ctrl = {
+		.roi_td_en = 1,       /* enable ROI programming */
+		.roni_n_en = 1,       /* ROI mode */
+		.pix_roi_slope_n = 3, /* default value */
+		.pix_roi_slope_p = 3, /* default value */
+	};
+
+	/* Keep pixels active if already streaming */
+	if (imx636->streaming)
+		roi_ctrl.px_td_rstn = 1;
+
+	/* Enable the ROI programming */
+	RET_ON(imx636_write_reg(imx636, IMX636_ROI_CTRL, roi_ctrl.raw));
+
+	/* The window control reacts to a 0->1 transition */
+	RET_ON(imx636_write_reg(imx636, IMX636_ROI_WIN_CTRL, 0));
+
+	/* Set the top left corner */
+	pos.x = roi->left;
+	pos.y = roi->top;
+	RET_ON(imx636_write_reg(imx636, IMX636_ROI_WIN_START, pos.raw));
+
+	/* The bottom right corner */
+	pos.x = roi->left + roi->width - 1;
+	pos.y = roi->top + roi->height - 1;
+	RET_ON(imx636_write_reg(imx636, IMX636_ROI_WIN_END, pos.raw));
+
+	/* Trigger the write of rows and columns */
+	RET_ON(imx636_write_reg(imx636, IMX636_ROI_WIN_CTRL, 1));
+
+	/* The I2C slave address selection hides the window ctrl work time */
+	/* Propagate to the analog */
+	roi_ctrl.shadow_trigger = 1;
+	ret = imx636_write_reg(imx636, IMX636_ROI_CTRL, roi_ctrl.raw);
+	return ret;
+}
+
+static int imx636_set_selection(struct v4l2_subdev *sd,
+				struct v4l2_subdev_state *sd_state,
+				struct v4l2_subdev_selection *sel)
+{
+	struct imx636 *imx636 = to_imx636(sd);
+	struct v4l2_rect *crop;
+
+	if (sel->target != V4L2_SEL_TGT_CROP)
+		return -EINVAL;
+
+	mutex_lock(&imx636->mutex);
+	crop = imx636_get_pad_crop(imx636, sd_state, sel->pad, sel->which);
+	crop->left = clamp(sel->r.left, 0, PIXEL_ARRAY_WIDTH - 1);
+	crop->top = clamp(sel->r.top, 0, PIXEL_ARRAY_HEIGHT - 1);
+	crop->width = clamp((s32)sel->r.width, 1, PIXEL_ARRAY_WIDTH - crop->left);
+	crop->height = clamp((s32)sel->r.height, 1, PIXEL_ARRAY_HEIGHT - crop->top);
+
+	if ((sel->which == V4L2_SUBDEV_FORMAT_ACTIVE) && imx636->initialized)
+		imx636_set_roi_rect(imx636, crop);
+
+	mutex_unlock(&imx636->mutex);
+
+	return 0;
+}
+
+
+static int imx636_get_selection(struct v4l2_subdev *sd,
+				struct v4l2_subdev_state *sd_state,
+				struct v4l2_subdev_selection *sel)
+{
+	switch (sel->target) {
+	case V4L2_SEL_TGT_CROP: {
+		struct imx636 *imx636 = to_imx636(sd);
+
+		mutex_lock(&imx636->mutex);
+		sel->r = *imx636_get_pad_crop(imx636, sd_state, sel->pad,
+		sel->which);
+		mutex_unlock(&imx636->mutex);
+		return 0;
+	}
+
+	case V4L2_SEL_TGT_CROP_DEFAULT:
+	case V4L2_SEL_TGT_NATIVE_SIZE:
+	case V4L2_SEL_TGT_CROP_BOUNDS:
+		sel->r.top = 0;
+		sel->r.left = 0;
+		sel->r.width = PIXEL_ARRAY_WIDTH;
+		sel->r.height = PIXEL_ARRAY_HEIGHT;
+		return 0;
+	}
+	return -EINVAL;
+}
+
 
 /**
  * imx636_reconfigure_csi2_freq() - Reconfigure the clock tree for the selected CSI-2 freq
@@ -1025,6 +1175,8 @@ static const struct v4l2_subdev_pad_ops imx636_pad_ops = {
 	.enum_frame_size = imx636_enum_frame_size,
 	.get_fmt = imx636_get_pad_format,
 	.set_fmt = imx636_set_pad_format,
+	.get_selection = imx636_get_selection,
+	.set_selection = imx636_set_selection,
 };
 
 static const struct v4l2_subdev_ops imx636_subdev_ops = {
@@ -1149,9 +1301,15 @@ static int imx636_power_on(struct device *dev)
 	ret = __v4l2_ctrl_handler_setup(imx636->sd.ctrl_handler);
 	if (ret)
 		goto error_v4l2_ctrl_handler_setup;
+
+	ret = imx636_set_roi_rect(imx636, &imx636->crop);
+	if (ret)
+		goto error_set_roi_rect;
+
 	mutex_unlock(&imx636->mutex);
 	return 0;
 
+error_set_roi_rect:
 error_v4l2_ctrl_handler_setup:
 error_init:
 error_checking_boot:
@@ -1447,6 +1605,12 @@ static int imx636_probe(struct i2c_client *client)
 			"failed to register async subdev: %d", ret);
 		goto error_register_subdev;
 	}
+
+	/* Set crop to full sensor resolution */
+	imx636->crop.top = 0;
+	imx636->crop.left = 0;
+	imx636->crop.width = PIXEL_ARRAY_WIDTH;
+	imx636->crop.height = PIXEL_ARRAY_HEIGHT;
 
 	pm_runtime_set_active(imx636->dev);
 	pm_runtime_enable(imx636->dev);
