@@ -1369,7 +1369,7 @@ static int create_bias_controls(struct imx636 *imx636)
 	RET_ON(new_bctrl(imx636, 0x54, 0x34, 0x64, V4L2_CID_BIAS_DIFF));
 	RET_ON(new_bctrl(imx636, 0x00, 0x0F, 0xFF, V4L2_CID_BIAS_DIFF_OFF));
 	RET_ON(new_bctrl(imx636, 0x14, 0x00, 0xFF, V4L2_CID_BIAS_REFR));
-	RET_ON(new_bctrl(imx636, 0x00, 0x00, 0x78, V4L2_CID_BIAS_HPF));
+	RET_ON(new_bctrl(imx636, 0x00, 0x00, 0x96, V4L2_CID_BIAS_HPF));
 	return 0;
 }
 
