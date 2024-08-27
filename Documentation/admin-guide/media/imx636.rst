@@ -56,9 +56,11 @@ Currently, the driver supports
 - default packetization
 - lanes at 600, 800, 1200 or 1500MHz
 - data output in EVT 2.1 (with limitations) or EVT 3.0
+- Square region of interest (through crop selection)
+- some test patterns
 
-Output format control
----------------------
+Output format
+-------------
 
 The sensor data is not raw pixel intensity measurement, but rather a stream of
 change events. Several encoding exists for such event, prioritizing bandwidth,
@@ -95,13 +97,3 @@ sent after the other fields on IMX636, swapping the two 32-bit halves of the
 event, resulting in some middle-endian encoding. This behavior is advertised as
 ``PSEE_EVT21ME`` on the driver.
 
-Provided that ``media-ctl`` from `v4l-utils <https://linuxtv.org/wiki/index.php/V4l-utils>`_
-has been built with the above media codes in its sources, it can be used to
-configure the IMX636 output format as follow:
-
-.. code-block:: none
-
-	media-ctl -V "'imx636 6-003c':0[fmt:PSEE_EVT21/1280x720]"
-
-If either ``PSEE_EVT21`` or ``PSEE_EVT21ME`` is requested, the format is set to
-``PSEE_EVT21ME``, otherwise, ``PSEE_EVT3`` is set.

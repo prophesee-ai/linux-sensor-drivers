@@ -1,0 +1,111 @@
+.. SPDX-License-Identifier: GPL-2.0
+
+Sony IMX636 sensor driver
+=========================
+
+Introduction
+------------
+
+The Sony IMX636 sensor is an Event-Based Vision Sensor (EVS) designed in
+cooperation between Sony and Prophesee. An EVS detects movement with high
+temporal resolution by detecting luminance changes, which each pixel senses
+asynchronously, and only outputting the differential data after combining with
+the coordinate and time information.
+
+Output format control
+---------------------
+
+Output format selection in Prophesee Evt 2.1 and 3.0 formats are supported,
+however, in evt 2.1, the two halves of the 64-bit event are inverted, resulting
+in a kind of middle-endianness, advertised as ``PSEE_EVT21ME``.
+
+Provided that ``media-ctl`` from `v4l-utils <https://linuxtv.org/wiki/index.php/V4l-utils>`_
+has been built with the above media codes in its sources, it can be used to
+configure the IMX636 output format as follow:
+
+.. code-block:: none
+
+	media-ctl -V "'imx636 6-003c':0[fmt:PSEE_EVT21/1280x720]"
+
+If either ``PSEE_EVT21`` or ``PSEE_EVT21ME`` is requested, the format is set to
+``PSEE_EVT21ME``, otherwise, ``PSEE_EVT3`` is set.
+
+The geometry of the sensor is fixed (but part of it may be disabled with a crop
+selection).
+
+The packetization on the MIPI CSI-2 link is independent from the pixel array
+size, and the frame rate in the CSI-2 protocol is arbitrary. Those are kept to
+their default value, and are not affected by output format selection.
+
+Region of Interest (crop)
+-------------------------
+
+It is possible to deactivate rows and columns on the pixel matrix, disabling a
+pixel when either or both its row and column are disabled. This allow to create
+various selections on the pixel matrix. In this driver, only a rectangular
+selection is implemented, using the ROI Window block to simplify register
+accesses.
+
+This selection is presented to userland through the V4L2 selection API, as crop,
+and can be enabled via media-ctl:
+
+.. code-block:: none
+
+	media-ctl -V "'imx636 6-003c':0[crop(320,120)/640x480]"
+
+The selection is done directly on the analog pixels, before serialization of the
+events, effectively reducing the activity on the readout -the block that
+serializes and timestamps the events-, but does not alter the coordinates of the
+pixels. With the above selection, events may be generated between pixel(320,120)
+and pixel(959,599). To avoid issues at decoding time, the sensor output remains
+advertised as 1280x720, possibly causing over-reservation of memory, but
+advertising 640x480 size would cause the pixels to be out of the declared size.
+
+This could be fixed using the digital crop, a block that may apply a
+translation on the event coordinates, but the current design allows to modify
+the crop while streaming, without adverse impact on the software processing.
+
+Test Patterns
+-------------
+
+The driver implement the standard test_pattern control menu (0x009f0903). The
+following patterns are proposed:
+
+Pixel Array
+'''''''''''
+
+Actually not a test pattern, this is the standard source of data of the sensor,
+used in regular streaming.
+
+Time base
+'''''''''
+
+Pixel events are represented by the polarity of the event (more or less light),
+the coordinate of the pixel (x,y), and the time of the event, to preserve the
+time accuracy while streaming the data over a packetized link, such as
+MIPI CSI-2, or simply a DMA transfer before software processing.
+
+The complete timestamp is not repeated in each event, the most significant bits
+are updated through a dedicated event in the protocol, to save bandwidth. This
+pseudo-pattern just keeps pixels in reset so that only timebase update events
+(referred as time-high) are issued by the readout.
+
+Selecting this pattern just alters the start-up sequence to keep pixels in
+reset, but other settings may inject extra events in the stream, such as the
+timestamping of external events ("external trigger"), or statistics computed
+by the Event-Rate Controller, that are enabled by default.
+
+Readout Pattern
+'''''''''''''''
+
+With this pattern, the read-out replaces the pixel-generated events by a fixed
+pattern of events, each line producing for each group of 32 pixels an event of
+positive brightness change with 0x5a5a5a5a as vector of triggered pixels,
+followed by the same event with negative polarity.
+
+The temporality of this pattern is changed by the output settings of the
+sensor (number of lanes, frequency, inter-packet delays), thus the position of
+the time-high events in the stream, as well as the streaming statistics, are
+not easy to predict, making the pattern not ideal for bit-accurate verification,
+but the presence and the non-repetition of pixel events can be checked, and the
+pattern follows the event protocol makes it displayable.
