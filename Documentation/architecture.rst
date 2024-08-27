@@ -5,4 +5,5 @@
 
 .. toctree::
 
-   admin-guide/media/imx636
+   IMX636 linux driver <admin-guide/media/imx636>
+   IMX636 driver userspace API <userspace-api/media/drivers/imx636>
