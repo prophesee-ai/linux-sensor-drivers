@@ -16,9 +16,10 @@
 #include <media/v4l2-ctrls.h>
 #include <media/v4l2-fwnode.h>
 #include <media/v4l2-subdev.h>
-#include "genx320_registers.h"
 #include "psee_controls.h"
+#include "genx320_controls.h"
 #include "genx320.h"
+#include "drivers/genx320/genx320_registers.h"
 
 #define GENX320_PIXEL_ARRAY_WIDTH 320U
 #define GENX320_PIXEL_ARRAY_HEIGHT 320U
@@ -118,6 +119,14 @@ static int genx320_read(struct genx320 *genx320, u32 reg, u32 *val)
 	return ret;
 }
 
+static int genx320_ctrl_read(void *hdl, u32 reg, u32 *val)
+{
+	struct psee_v4l2_ctrl_wrapper *pcw = hdl;
+	struct genx320 *genx320 = container_of(pcw, struct genx320, pcw);
+
+	return genx320_read(genx320, reg, val);
+}
+
 /**
  * genx320_write_reg() - Write one register
  * @genx320: pointer to genx320 device
@@ -151,6 +160,14 @@ static int genx320_write(struct genx320 *genx320, u32 reg, const u32 val)
 	}
 
 	return ret;
+}
+
+static int genx320_ctrl_write(void *hdl, u32 reg, u32 val)
+{
+	struct psee_v4l2_ctrl_wrapper *pcw = hdl;
+	struct genx320 *genx320 = container_of(pcw, struct genx320, pcw);
+
+	return genx320_write(genx320, reg, val);
 }
 
 static int genx320_set(struct genx320 *genx320, u32 reg, const u32 mask)
@@ -548,6 +565,8 @@ static int genx320_tune_analog(struct genx320 *genx320)
  */
 static int genx320_init(struct genx320 *genx320)
 {
+	int ret = 0;
+	struct psee_v4l2_ctrl_wrapper *pcw = &genx320->pcw;
 	mipi_csi_stat_ctrl mipi_csi_stat_ctrl;
 	// enable MIPI statistics
 	RET_ON(genx320_read(genx320, mipi_csi_stat_ctrl_address, &mipi_csi_stat_ctrl.raw));
@@ -557,6 +576,31 @@ static int genx320_init(struct genx320 *genx320)
 	RET_ON(genx320_set_mipi_packet_config(genx320));
 	RET_ON(genx320_apply_format(genx320));
 	RET_ON(genx320_tune_analog(genx320));
+
+	ret = call_esp_op(pcw, roi_window, init);
+	if (ret < 0) {
+		dev_err(genx320->pcw.dev, "genx320_roi_window_init failed (%d)\n", ret);
+		return ret;
+	}
+
+	ret = call_esp_op(pcw, roi_pixel, init);
+	if (ret < 0) {
+		dev_err(genx320->pcw.dev, "genx320_roi_pixel_init failed (%d)\n", ret);
+		return ret;
+	}
+
+	ret = call_esp_op(pcw, erc, init);
+	if (ret < 0) {
+		dev_err(genx320->pcw.dev, "genx320_erc_init failed (%d)\n", ret);
+		return ret;
+	}
+
+	ret = call_esp_op(pcw, bias, init);
+	if (ret < 0) {
+		dev_err(genx320->pcw.dev, "genx320_bias_init failed (%d)\n", ret);
+		return ret;
+	}
+
 	return 0;
 }
 
@@ -609,15 +653,15 @@ static int genx320_start_streaming(struct genx320 *genx320)
  */
 static int genx320_stop_streaming(struct genx320 *genx320)
 {
-	roi_ctrl roi_ctrl;
+	// roi_ctrl roi_ctrl;
 	ro_td_ctrl ro_td_ctrl;
 	ro_lp_ctrl ro_lp_ctrl;
 	ro_time_base_ctrl ro_time_base_ctrl;
 	mipi_csi_ctrl mipi_csi_ctrl;
 
-	RET_ON(genx320_read(genx320, roi_ctrl_address, &roi_ctrl.raw));
-	roi_ctrl.px_sw_rstn = 0;
-	RET_ON(genx320_write(genx320, roi_ctrl_address, roi_ctrl.raw));
+	// RET_ON(genx320_read(genx320, roi_ctrl_address, &roi_ctrl.raw));
+	// roi_ctrl.px_sw_rstn = 0;
+	// RET_ON(genx320_write(genx320, roi_ctrl_address, roi_ctrl.raw));
 
 	RET_ON(genx320_read(genx320, ro_td_ctrl_address, &ro_td_ctrl.raw));
 	ro_td_ctrl.ro_td_ack_y_rstn = 0;
@@ -934,6 +978,8 @@ static int genx320_power_on(struct device *dev)
 		goto error_reset;
 	}
 
+	genx320->pcw.initialized = true;
+
 	return 0;
 
 error_reset:
@@ -967,8 +1013,15 @@ static int genx320_power_off(struct device *dev)
 	regulator_bulk_disable(ARRAY_SIZE(genx320_supply_names),
 			       genx320->supplies);
 
+	genx320->pcw.initialized = false;
+
 	return 0;
 }
+
+static const struct psee_ctrl_ops genx320_ctrl_ops = {
+	.read_reg = &genx320_ctrl_read,
+	.write_reg = &genx320_ctrl_write,
+};
 
 /**
  * genx320_probe() - I2C client device binding
@@ -1004,6 +1057,7 @@ static int genx320_probe(struct i2c_client *client)
 
 	/* Set default output format */
 	genx320->format_code = supported_formats[1];
+	genx320_init_controls(genx320, &genx320_ctrl_ops);
 
 	ret = genx320_power_on(genx320->pcw.dev);
 	if (ret) {

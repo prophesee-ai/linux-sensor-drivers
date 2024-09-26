@@ -1,4 +1,12 @@
-obj-m := imx636.o genx320.o
+obj-m := imx636.o genx320-driver.o
+genx320-driver-objs += \
+	genx320.o \
+	psee_controls.o \
+	genx320_controls.o \
+	drivers/genx320/genx320_roi.o \
+	drivers/genx320/genx320_roi_pixel.o \
+	drivers/genx320/genx320_erc.o \
+	drivers/genx320/genx320_bias.o \
 
 SRC := $(shell pwd)
 
