@@ -17,15 +17,14 @@
 #include <media/v4l2-fwnode.h>
 #include <media/v4l2-subdev.h>
 #include "genx320_registers.h"
+#include "psee_controls.h"
+#include "genx320.h"
 
 #define GENX320_PIXEL_ARRAY_WIDTH 320U
 #define GENX320_PIXEL_ARRAY_HEIGHT 320U
 
 #define GENX320_NUM_DATA_LANES 1
 #define GENX320_INCLK_RATE 20000000
-
-/* to avoid return value check on each register access */
-#define RET_ON(operation) do { int r = operation; if (unlikely(r != 0)) return r; } while (0)
 
 /*
  * Sensor registers
@@ -60,34 +59,6 @@ static const char * const genx320_supply_names[] = {
 	"vddd2",	/* Supply voltage (Digital 2) */
 };
 
-/**
- * struct genx320 - genx320 sensor device structure
- * @dev: Pointer to generic device
- * @client: Pointer to i2c client
- * @sd: V4L2 sub-device
- * @pad: Media pad. Only one pad supported
- * @nreset_gpio: Sensor RSTn gpio
- * @inclk: Sensor input clock
- * @supplies: Regulator supplies
- * @mutex: Mutex for serializing sensor controls
- * @link_freq: frequency of the CSI-2 clock lane
- * @format_code: Media-ctl code of the output format
- * @streaming: Flag indicating streaming state
- */
-struct genx320 {
-	struct device *dev;
-	struct i2c_client *client;
-	struct v4l2_subdev sd;
-	struct media_pad pad;
-	struct gpio_desc *nreset_gpio;
-	struct clk *inclk;
-	struct regulator_bulk_data supplies[ARRAY_SIZE(genx320_supply_names)];
-	struct mutex mutex;
-	s64 link_freq;
-	u32 format_code;
-	bool streaming;
-};
-
 static const s64 link_freq[] = {
 	800000000,
 };
@@ -99,7 +70,6 @@ static const u32 supported_formats[] = {
 	MEDIA_BUS_FMT_PSEE_EVT21,
 };
 
-
 /**
  * to_genx320() - genx320 V4L2 sub-device to genx320 device.
  * @subdev: pointer to genx320 V4L2 sub-device
@@ -108,7 +78,9 @@ static const u32 supported_formats[] = {
  */
 static inline struct genx320 *to_genx320(struct v4l2_subdev *subdev)
 {
-	return container_of(subdev, struct genx320, sd);
+	struct psee_v4l2_ctrl_wrapper *pcw = sd_to_pcw(subdev);
+
+	return container_of(pcw, struct genx320, pcw);
 }
 
 /**
@@ -121,7 +93,7 @@ static inline struct genx320 *to_genx320(struct v4l2_subdev *subdev)
  */
 static int genx320_read(struct genx320 *genx320, u32 reg, u32 *val)
 {
-	struct i2c_client *client = v4l2_get_subdevdata(&genx320->sd);
+	struct i2c_client *client = v4l2_get_subdevdata(&genx320->pcw.sd);
 	struct i2c_msg xfer[2] = {0};
 	int ret;
 
@@ -136,7 +108,7 @@ static int genx320_read(struct genx320 *genx320, u32 reg, u32 *val)
 
 	ret = i2c_transfer(client->adapter, xfer, 2);
 	if (ret != 2) {
-		dev_warn(genx320->dev, "read ret %d", ret);
+		dev_warn(genx320->pcw.dev, "read ret %d", ret);
 		ret = (ret < 0) ? ret : -EIO;
 	} else {
 		*val = be32_to_cpu(*val);
@@ -156,7 +128,7 @@ static int genx320_read(struct genx320 *genx320, u32 reg, u32 *val)
  */
 static int genx320_write(struct genx320 *genx320, u32 reg, const u32 val)
 {
-	struct i2c_client *client = v4l2_get_subdevdata(&genx320->sd);
+	struct i2c_client *client = v4l2_get_subdevdata(&genx320->pcw.sd);
 	struct i2c_msg xfer = {0};
 	u8 buf[2 + 4] = {0};
 	u16 *regp = (u16 *)&buf[0];
@@ -174,7 +146,7 @@ static int genx320_write(struct genx320 *genx320, u32 reg, const u32 val)
 	if (ret > 0) {
 		ret = 0;
 	} else {
-		dev_warn(genx320->dev, "write ret %d", ret);
+		dev_warn(genx320->pcw.dev, "write ret %d", ret);
 		ret = (ret < 0) ? ret : -EIO;
 	}
 
@@ -388,7 +360,6 @@ static  __maybe_unused int genx320_reconfigure_csi2_freq(struct genx320 *genx320
 	return 0;
 }
 
-
 /**
  * genx320_apply_format() - Set the sensor to output the selected format
  * @genx320: pointer to genx320 device
@@ -441,12 +412,12 @@ static int genx320_check_boot(struct genx320 *genx320)
 
 	ret = genx320_read(genx320, GENX320_MBX_MISC, &val);
 	if (ret) {
-		dev_warn(genx320->dev, "could not get the boot magic");
+		dev_warn(genx320->pcw.dev, "could not get the boot magic");
 		return ret;
 	}
 
 	if (val != GENX320_BOOT_MAGIC) {
-		dev_warn(genx320->dev, "unexpected boot magic, got %u, expected %u",
+		dev_warn(genx320->pcw.dev, "unexpected boot magic, got %u, expected %u",
 			 val, GENX320_BOOT_MAGIC);
 		return -ENXIO;
 	}
@@ -694,7 +665,7 @@ static int genx320_set_stream(struct v4l2_subdev *sd, int enable)
 	}
 
 	if (enable) {
-		ret = pm_runtime_resume_and_get(genx320->dev);
+		ret = pm_runtime_resume_and_get(genx320->pcw.dev);
 		if (ret < 0)
 			goto error_unlock;
 
@@ -703,7 +674,7 @@ static int genx320_set_stream(struct v4l2_subdev *sd, int enable)
 			goto error_power_off;
 	} else {
 		genx320_stop_streaming(genx320);
-		pm_runtime_put(genx320->dev);
+		pm_runtime_put(genx320->pcw.dev);
 	}
 
 	genx320->streaming = enable;
@@ -713,7 +684,7 @@ static int genx320_set_stream(struct v4l2_subdev *sd, int enable)
 	return 0;
 
 error_power_off:
-	pm_runtime_put(genx320->dev);
+	pm_runtime_put(genx320->pcw.dev);
 error_unlock:
 	mutex_unlock(&genx320->mutex);
 
@@ -736,7 +707,7 @@ static int genx320_detect(struct genx320 *genx320)
 		return ret;
 
 	if (val != GENX320_ID) {
-		dev_err(genx320->dev, "chip id mismatch: %x!=%x",
+		dev_err(genx320->pcw.dev, "chip id mismatch: %x!=%x",
 			GENX320_ID, val);
 		return -ENXIO;
 	}
@@ -752,7 +723,7 @@ static int genx320_detect(struct genx320 *genx320)
  */
 static int genx320_parse_hw_config(struct genx320 *genx320)
 {
-	struct fwnode_handle *fwnode = dev_fwnode(genx320->dev);
+	struct fwnode_handle *fwnode = dev_fwnode(genx320->pcw.dev);
 	struct v4l2_fwnode_endpoint bus_cfg = {
 		.bus_type = V4L2_MBUS_CSI2_DPHY
 	};
@@ -765,24 +736,24 @@ static int genx320_parse_hw_config(struct genx320 *genx320)
 		return -ENXIO;
 
 	/* Request optional reset pin */
-	genx320->nreset_gpio = devm_gpiod_get_optional(genx320->dev, "nreset",
+	genx320->nreset_gpio = devm_gpiod_get_optional(genx320->pcw.dev, "nreset",
 						       GPIOD_OUT_LOW);
 	if (IS_ERR(genx320->nreset_gpio)) {
-		dev_err(genx320->dev, "failed to get reset gpio %ld",
+		dev_err(genx320->pcw.dev, "failed to get reset gpio %ld",
 			PTR_ERR(genx320->nreset_gpio));
 		return PTR_ERR(genx320->nreset_gpio);
 	}
 
 	/* Get sensor input clock */
-	genx320->inclk = devm_clk_get(genx320->dev, NULL);
+	genx320->inclk = devm_clk_get(genx320->pcw.dev, NULL);
 	if (IS_ERR(genx320->inclk)) {
-		dev_err(genx320->dev, "could not get inclk");
+		dev_err(genx320->pcw.dev, "could not get inclk");
 		return PTR_ERR(genx320->inclk);
 	}
 
 	rate = clk_get_rate(genx320->inclk);
 	if (rate != GENX320_INCLK_RATE) {
-		dev_err(genx320->dev, "inclk frequency mismatch");
+		dev_err(genx320->pcw.dev, "inclk frequency mismatch");
 		return -EINVAL;
 	}
 
@@ -790,7 +761,7 @@ static int genx320_parse_hw_config(struct genx320 *genx320)
 	for (i = 0; i < ARRAY_SIZE(genx320_supply_names); i++)
 		genx320->supplies[i].supply = genx320_supply_names[i];
 
-	ret = devm_regulator_bulk_get(genx320->dev,
+	ret = devm_regulator_bulk_get(genx320->pcw.dev,
 				      ARRAY_SIZE(genx320_supply_names),
 				      genx320->supplies);
 	if (ret)
@@ -806,7 +777,7 @@ static int genx320_parse_hw_config(struct genx320 *genx320)
 		return ret;
 
 	if (bus_cfg.bus.mipi_csi2.num_data_lanes != GENX320_NUM_DATA_LANES) {
-		dev_err(genx320->dev,
+		dev_err(genx320->pcw.dev,
 			"number of CSI2 data lanes %d is not supported",
 			bus_cfg.bus.mipi_csi2.num_data_lanes);
 		ret = -EINVAL;
@@ -814,7 +785,7 @@ static int genx320_parse_hw_config(struct genx320 *genx320)
 	}
 
 	if (!bus_cfg.nr_of_link_frequencies) {
-		dev_err(genx320->dev, "no link frequencies defined");
+		dev_err(genx320->pcw.dev, "no link frequencies defined");
 		ret = -EINVAL;
 		goto done_endpoint_free;
 	}
@@ -822,14 +793,14 @@ static int genx320_parse_hw_config(struct genx320 *genx320)
 	for (i = 0; i < bus_cfg.nr_of_link_frequencies; i++) {
 		for (j = 0; j < ARRAY_SIZE(link_freq); j++) {
 			if (bus_cfg.link_frequencies[i] == link_freq[j]) {
-				dev_info(genx320->dev, "Using CSI-2 freq %lld", link_freq[j]);
+				dev_info(genx320->pcw.dev, "Using CSI-2 freq %lld", link_freq[j]);
 				genx320->link_freq = link_freq[j];
 				goto done_endpoint_free;
 			}
 		}
 	}
 
-	dev_err(genx320->dev, "none of the link frequencies is supported");
+	dev_err(genx320->pcw.dev, "none of the link frequencies is supported");
 	ret = -EINVAL;
 
 done_endpoint_free:
@@ -842,7 +813,7 @@ static int genx320_log_status(struct v4l2_subdev *sd)
 {
 	u32 val;
 	struct genx320 *genx320 = to_genx320(sd);
-	struct device *dev = genx320->dev;
+	struct device *dev = genx320->pcw.dev;
 
 	dev_info(dev, "******* MIPI_CSI STATUS ********");
 	RET_ON(genx320_read(genx320, mipi_csi_stat_frame_cnt_address, &val));
@@ -940,7 +911,7 @@ static int genx320_power_on(struct device *dev)
 
 	ret = clk_prepare_enable(genx320->inclk);
 	if (ret) {
-		dev_err(genx320->dev, "fail to enable inclk");
+		dev_err(genx320->pcw.dev, "fail to enable inclk");
 		goto error_reset;
 	}
 
@@ -953,13 +924,13 @@ static int genx320_power_on(struct device *dev)
 	msleep_interruptible(15 + 55);
 	ret = genx320_check_boot(genx320);
 	if (ret) {
-		dev_err(genx320->dev, "fail to boot sensor");
+		dev_err(genx320->pcw.dev, "fail to boot sensor");
 		goto error_reset;
 	}
 
 	ret = genx320_init(genx320);
 	if (ret) {
-		dev_err(genx320->dev, "fail to initialize sensor");
+		dev_err(genx320->pcw.dev, "fail to initialize sensor");
 		goto error_reset;
 	}
 
@@ -1015,17 +986,17 @@ static int genx320_probe(struct i2c_client *client)
 	if (!genx320)
 		return -ENOMEM;
 
-	genx320->dev = &client->dev;
+	genx320->pcw.dev = &client->dev;
 	name = device_get_match_data(&client->dev);
 	if (!name)
 		return -ENODEV;
 
 	/* Initialize subdev */
-	v4l2_i2c_subdev_init(&genx320->sd, client, &genx320_subdev_ops);
+	v4l2_i2c_subdev_init(&genx320->pcw.sd, client, &genx320_subdev_ops);
 
 	ret = genx320_parse_hw_config(genx320);
 	if (ret) {
-		dev_err(genx320->dev, "HW configuration is not supported");
+		dev_err(genx320->pcw.dev, "HW configuration is not supported");
 		return ret;
 	}
 
@@ -1034,53 +1005,52 @@ static int genx320_probe(struct i2c_client *client)
 	/* Set default output format */
 	genx320->format_code = supported_formats[1];
 
-	ret = genx320_power_on(genx320->dev);
+	ret = genx320_power_on(genx320->pcw.dev);
 	if (ret) {
-		dev_err(genx320->dev, "failed to power-on the sensor");
+		dev_err(genx320->pcw.dev, "failed to power-on the sensor");
 		goto error_mutex_destroy;
 	}
 
 	/* Check module identity */
 	ret = genx320_detect(genx320);
 	if (ret) {
-		dev_err(genx320->dev, "failed to find sensor: %d", ret);
+		dev_err(genx320->pcw.dev, "failed to find sensor: %d", ret);
 		goto error_power_off;
 	}
 
-
 	/* Initialize subdev */
-	genx320->sd.flags |= V4L2_SUBDEV_FL_HAS_DEVNODE;
-	genx320->sd.entity.function = MEDIA_ENT_F_CAM_SENSOR;
+	genx320->pcw.sd.flags |= V4L2_SUBDEV_FL_HAS_DEVNODE;
+	genx320->pcw.sd.entity.function = MEDIA_ENT_F_CAM_SENSOR;
 
-	v4l2_i2c_subdev_set_name(&genx320->sd, client, name, NULL);
+	v4l2_i2c_subdev_set_name(&genx320->pcw.sd, client, name, NULL);
 
 	/* Initialize source pad */
 	genx320->pad.flags = MEDIA_PAD_FL_SOURCE;
-	ret = media_entity_pads_init(&genx320->sd.entity, 1, &genx320->pad);
+	ret = media_entity_pads_init(&genx320->pcw.sd.entity, 1, &genx320->pad);
 	if (ret) {
-		dev_err(genx320->dev, "failed to init entity pads: %d", ret);
+		dev_err(genx320->pcw.dev, "failed to init entity pads: %d", ret);
 		goto error_handler_free;
 	}
 
-	ret = v4l2_async_register_subdev_sensor(&genx320->sd);
+	ret = v4l2_async_register_subdev_sensor(&genx320->pcw.sd);
 	if (ret < 0) {
-		dev_err(genx320->dev,
+		dev_err(genx320->pcw.dev,
 			"failed to register async subdev: %d", ret);
 		goto error_media_entity;
 	}
 
-	pm_runtime_set_active(genx320->dev);
-	pm_runtime_enable(genx320->dev);
-	pm_runtime_idle(genx320->dev);
+	pm_runtime_set_active(genx320->pcw.dev);
+	pm_runtime_enable(genx320->pcw.dev);
+	pm_runtime_idle(genx320->pcw.dev);
 
 	return 0;
 
 error_media_entity:
-	media_entity_cleanup(&genx320->sd.entity);
+	media_entity_cleanup(&genx320->pcw.sd.entity);
 error_handler_free:
-	v4l2_ctrl_handler_free(genx320->sd.ctrl_handler);
+	v4l2_ctrl_handler_free(genx320->pcw.sd.ctrl_handler);
 error_power_off:
-	genx320_power_off(genx320->dev);
+	genx320_power_off(genx320->pcw.dev);
 error_mutex_destroy:
 	mutex_destroy(&genx320->mutex);
 

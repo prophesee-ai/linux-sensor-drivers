@@ -106,7 +106,6 @@ PSEE_REGISTER_DEF(edf_control, 0x7044, {
 	u32 endianness :1;
 });
 
-
 PSEE_REGISTER_DEF(bgen, 0x1000, {
 	u32 bias_ctrl :7;
 	u32:9;
