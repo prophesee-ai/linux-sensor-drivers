@@ -7,6 +7,8 @@ genx320-driver-objs += \
 	drivers/genx320/genx320_roi_pixel.o \
 	drivers/genx320/genx320_erc.o \
 	drivers/genx320/genx320_bias.o \
+	drivers/genx320/genx320_mipi.o \
+	drivers/genx320/genx320.o
 
 SRC := $(shell pwd)
 

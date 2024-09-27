@@ -377,6 +377,20 @@ static  __maybe_unused int genx320_reconfigure_csi2_freq(struct genx320 *genx320
 	return 0;
 }
 
+static int genx320_configure_mipi(struct genx320 *genx320)
+{
+	struct mipi_config *mipi = &genx320->pcw.controls.mipi;
+
+	// TODO: get configuration from device tree
+	mipi->format = VARIABLE_SIZE;
+	mipi->bit_rate = 800;
+	mipi->num_lanes = 1;
+	mipi->stats_en = true;
+
+	RET_ON(call_mipi_op(&genx320->pcw, configure));
+	return 0;
+}
+
 /**
  * genx320_apply_format() - Set the sensor to output the selected format
  * @genx320: pointer to genx320 device
@@ -385,33 +399,22 @@ static  __maybe_unused int genx320_reconfigure_csi2_freq(struct genx320 *genx320
  */
 static int genx320_apply_format(struct genx320 *genx320)
 {
-	edf_pipeline_control edf_pipeline_control;
-	edf_control edf_control = {
-		.raw = 0
-	};
-
+	enum event_format format;
 	switch (genx320->format_code) {
 	case MEDIA_BUS_FMT_PSEE_EVT2:
-		edf_control.format = 0;
+		format = EVENT_FORMAT_EVT2;
 		break;
 	case MEDIA_BUS_FMT_PSEE_EVT3:
-		edf_control.format = 1;
+		format = EVENT_FORMAT_EVT3;
 		break;
 	case MEDIA_BUS_FMT_PSEE_EVT21:
-		edf_control.format = 2;
+		format = EVENT_FORMAT_EVT21;
 		break;
 	default:
 		return -EINVAL;
 	}
-#ifdef __BIG_ENDIAN
-	edf_control.endianness = 1;
-#endif
-	RET_ON(genx320_write(genx320, edf_control_address, edf_control.raw));
 
-	RET_ON(genx320_read(genx320, edf_pipeline_control_address, &edf_pipeline_control.raw));
-	edf_pipeline_control.enable = 1;
-	edf_pipeline_control.bypass = genx320->format_code == MEDIA_BUS_FMT_PSEE_EVT21;
-	RET_ON(genx320_write(genx320, edf_pipeline_control_address, edf_pipeline_control.raw));
+	call_core_op(&genx320->pcw, s_format, format);
 	return 0;
 }
 
@@ -438,81 +441,6 @@ static int genx320_check_boot(struct genx320 *genx320)
 			 val, GENX320_BOOT_MAGIC);
 		return -ENXIO;
 	}
-
-	return 0;
-}
-
-static __maybe_unused int genx320_soft_reset(struct genx320 *genx320)
-{
-	// dig_soft_reset
-	RET_ON(genx320_set(genx320, dig_soft_reset_address, 0x1));
-	// mbx/cpu_soft_rest
-	RET_ON(genx320_set(genx320, mbx_cpu_soft_reset_address, 0x1));
-	msleep(10);
-	// mbx/cpu_soft_rest
-	RET_ON(genx320_clear(genx320, mbx_cpu_soft_reset_address, 0x1));
-	msleep(10);
-	return genx320_check_boot(genx320);
-}
-
-/**
- * genx320_set_mipi_packet_config() - Reconfigure the MIPI frame/packet
- * configuration in variable mode.
- * @genx320: pointer to genx320 device
- *
- * Return: 0 if successful, error code otherwise.
- */
-static int genx320_set_mipi_packet_config(struct genx320 *genx320)
-{
-	mipi_csi_ctrl mipi_csi_ctrl;
-	mipi_csi_frame_ctrl mipi_csi_frame_ctrl;
-	edf_output_interface_control edf_output_interface_control;
-	edf_external_output_adapter edf_external_output_adapter;
-	sram_initn sram_initn;
-	sram_pd1 sram_pd1;
-
-	RET_ON(genx320_read(genx320, mipi_csi_frame_ctrl_address, &mipi_csi_frame_ctrl.raw));
-	mipi_csi_frame_ctrl.pkt_timeout_en = 0;
-	mipi_csi_frame_ctrl.pkt_fix_rate_en = 0;
-	mipi_csi_frame_ctrl.pkt_fix_size_en = 0;
-	mipi_csi_frame_ctrl.frame_fix_rate_en = 0;
-	mipi_csi_frame_ctrl.frame_fix_size_en = 0;
-	mipi_csi_frame_ctrl.fix_rate_empty_pkt = 0;
-	RET_ON(genx320_write(genx320, mipi_csi_frame_ctrl_address, mipi_csi_frame_ctrl.raw));
-
-	RET_ON(genx320_read(genx320, mipi_csi_ctrl_address, &mipi_csi_ctrl.raw));
-	mipi_csi_ctrl.pkt_size = 0x1000;
-	RET_ON(genx320_write(genx320, mipi_csi_ctrl_address, mipi_csi_ctrl.raw));
-
-	RET_ON(genx320_read(genx320, edf_output_interface_control_address,
-			    &edf_output_interface_control.raw));
-
-	edf_output_interface_control.start_of_frame_timeout = 0x271;
-
-	RET_ON(genx320_write(genx320, edf_output_interface_control_address,
-			     edf_output_interface_control.raw));
-
-	RET_ON(genx320_read(genx320, edf_external_output_adapter_address,
-			    &edf_external_output_adapter.raw));
-
-	edf_external_output_adapter.qos_timeout = 0xFFFF;
-	edf_external_output_adapter.atomic_qos_mode = 0;
-
-	RET_ON(genx320_write(genx320, edf_external_output_adapter_address,
-			     edf_external_output_adapter.raw));
-
-	RET_ON(genx320_read(genx320, sram_initn_address, &sram_initn.raw));
-	sram_initn.mipi_initn = 1;
-	RET_ON(genx320_write(genx320, sram_initn_address, sram_initn.raw));
-
-	RET_ON(genx320_read(genx320, sram_pd1_address, &sram_pd1.raw));
-	sram_pd1.mipi_pd = 0;
-	RET_ON(genx320_write(genx320, sram_pd1_address, sram_pd1.raw));
-
-	mipi_csi_ctrl.enable = 1;
-	RET_ON(genx320_write(genx320, mipi_csi_ctrl_address, mipi_csi_ctrl.raw));
-
-	RET_ON(genx320_write(genx320, 0x0000B024, 0x80003E80));
 
 	return 0;
 }
@@ -566,14 +494,16 @@ static int genx320_tune_analog(struct genx320 *genx320)
 static int genx320_init(struct genx320 *genx320)
 {
 	int ret = 0;
+	struct core_config *core = &genx320->pcw.controls.core;
 	struct psee_v4l2_ctrl_wrapper *pcw = &genx320->pcw;
-	mipi_csi_stat_ctrl mipi_csi_stat_ctrl;
-	// enable MIPI statistics
-	RET_ON(genx320_read(genx320, mipi_csi_stat_ctrl_address, &mipi_csi_stat_ctrl.raw));
-	mipi_csi_stat_ctrl.enable = 1;
-	RET_ON(genx320_write(genx320, mipi_csi_stat_ctrl_address, mipi_csi_stat_ctrl.raw));
 
-	RET_ON(genx320_set_mipi_packet_config(genx320));
+	dev_err(genx320->pcw.dev, "genx320_init\n");
+	// default config
+	core->source = SENSOR_SOURCE_PIXEL_ARRAY;
+	core->sensor_if = SENSOR_IF_MIPI;
+	core->format = EVENT_FORMAT_EVT3;
+
+	RET_ON(genx320_configure_mipi(genx320));
 	RET_ON(genx320_apply_format(genx320));
 	RET_ON(genx320_tune_analog(genx320));
 
@@ -612,37 +542,15 @@ static int genx320_init(struct genx320 *genx320)
  */
 static int genx320_start_streaming(struct genx320 *genx320)
 {
-	roi_ctrl roi_ctrl;
-	ro_td_ctrl ro_td_ctrl;
-	mipi_csi_ctrl mipi_csi_ctrl;
-	ro_lp_ctrl ro_lp_ctrl;
-	ro_time_base_ctrl ro_time_base_ctrl;
+	int ret = 0;
 
-	RET_ON(genx320_read(genx320, mipi_csi_ctrl_address, &mipi_csi_ctrl.raw));
-	mipi_csi_ctrl.enable = 1;
-	RET_ON(genx320_write(genx320, mipi_csi_ctrl_address, mipi_csi_ctrl.raw));
+	ret = __v4l2_ctrl_handler_setup(&genx320->pcw.hdl);
+	if (ret < 0) {
+		dev_err(genx320->pcw.sd.dev, "%s control init failed (%d)\n", __func__, ret);
+		return ret;
+	}
 
-	RET_ON(genx320_read(genx320, ro_lp_ctrl_address, &ro_lp_ctrl.raw));
-	ro_lp_ctrl.lp_output_disable = 0;
-	RET_ON(genx320_write(genx320, ro_lp_ctrl_address, ro_lp_ctrl.raw));
-
-	RET_ON(genx320_read(genx320, ro_time_base_ctrl_address, &ro_time_base_ctrl.raw));
-	ro_time_base_ctrl.time_base_enable = 1;
-	RET_ON(genx320_write(genx320, ro_time_base_ctrl_address, ro_time_base_ctrl.raw));
-
-	RET_ON(genx320_read(genx320, ro_td_ctrl_address, &ro_td_ctrl.raw));
-	ro_td_ctrl.ro_td_ack_y_rstn = 1;
-	ro_td_ctrl.ro_td_arb_y_rstn = 1;
-	ro_td_ctrl.ro_td_addr_y_rstn = 1;
-	ro_td_ctrl.ro_td_sendreq_y_rstn = 1;
-	RET_ON(genx320_write(genx320, ro_td_ctrl_address, ro_td_ctrl.raw));
-
-	RET_ON(genx320_read(genx320, roi_ctrl_address, &roi_ctrl.raw));
-	roi_ctrl.px_sw_rstn = 1;
-	roi_ctrl.roi_td_en = 1;
-	RET_ON(genx320_write(genx320, roi_ctrl_address, roi_ctrl.raw));
-
-	return 0;
+	return call_core_op(&genx320->pcw, start);
 }
 
 /**
@@ -858,6 +766,12 @@ static int genx320_log_status(struct v4l2_subdev *sd)
 	u32 val;
 	struct genx320 *genx320 = to_genx320(sd);
 	struct device *dev = genx320->pcw.dev;
+	struct mipi_config *mipi = &genx320->pcw.controls.mipi;
+
+	if (mipi->stats_en == false) {
+		dev_info(dev, "MIPI_CSI stats not enabled");
+		return 0;
+	}
 
 	dev_info(dev, "******* MIPI_CSI STATUS ********");
 	RET_ON(genx320_read(genx320, mipi_csi_stat_frame_cnt_address, &val));

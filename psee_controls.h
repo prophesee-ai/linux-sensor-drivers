@@ -83,8 +83,27 @@ struct psee_esp_ops {
 	const struct psee_roi_pixel_ops *roi_pixel;
 };
 
+struct psee_mipi_ops {
+	int (*configure)(struct psee_controls *controls);
+};
+
+struct psee_cpi_ops {
+	int (*configure)(struct psee_controls *controls);
+};
+
+struct psee_core_ops {
+	int (*s_format)(struct psee_controls *controls, enum event_format fmt);
+	int (*start)(struct psee_controls *controls);
+	int (*stop)(struct psee_controls *controls);
+	int (*get_height)(struct psee_controls *controls, u32 *height);
+	int (*get_width)(struct psee_controls *controls, u32 *width);
+};
+
 struct psee_ops {
 	const struct psee_esp_ops *esp;
+	const struct psee_mipi_ops *mipi;
+	const struct psee_cpi_ops *cpi;
+	const struct psee_core_ops *core;
 };
 
 struct psee_v4l2_ctrl_wrapper {
@@ -125,7 +144,22 @@ static inline struct psee_v4l2_ctrl_wrapper *psee_ctrl_to_pcw(struct psee_contro
 	(pcw)->ops->esp->mod->op(&((pcw)->controls), \
 				 ##__VA_ARGS__) : -EINVAL \
 )
+#define has_mipi(pcw) ((pcw)->ops && (pcw)->ops->mipi)
+#define has_mipi_op(pcw, op) (has_mipi(pcw) && (pcw)->ops->mipi->op)
+#define call_mipi_op(pcw, op, ...) (has_mipi_op(pcw, op) ? \
+	(pcw)->ops->mipi->op(&((pcw)->controls), \
+			     ##__VA_ARGS__) : -EINVAL \
+)
+
+#define has_core(pcw) ((pcw)->ops && (pcw)->ops->core)
+#define has_core_op(pcw, op) (has_core(pcw) && (pcw)->ops->core->op)
+#define call_core_op(pcw, op, ...) (has_core_op(pcw, op) ? \
+	(pcw)->ops->core->op(&((pcw)->controls), \
+			     ##__VA_ARGS__) : -EINVAL \
+)
 
 int psee_init_controls(struct psee_v4l2_ctrl_wrapper *pcw, const struct psee_ctrl_ops *ctrl_ops,
 		       struct psee_ops *ops);
+int psee_get_format(struct psee_v4l2_ctrl_wrapper *pcw, struct v4l2_mbus_framefmt *format);
+
 #endif /* __PSEE_CONTROLS_H */

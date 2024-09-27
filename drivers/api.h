@@ -35,6 +35,31 @@ struct roi_set {
 struct bias_config {
 };
 
+enum sensor_if {
+	SENSOR_IF_MIPI = 0,
+	SENSOR_IF_PARALLEL,
+	SENSOR_IF_INVALID,
+};
+
+enum sensor_source {
+	SENSOR_SOURCE_PIXEL_ARRAY = 0,
+	SENSOR_SOURCE_RO_PATTERN,
+	SENSOR_SOURCE_IF_PATTERN, // CPI/MIPI patterns
+};
+
+enum event_format {
+	EVENT_FORMAT_EVT2 = 0,
+	EVENT_FORMAT_EVT3,
+	EVENT_FORMAT_EVT21,
+	EVENT_FORMAT_INVALID,
+};
+
+struct core_config {
+	enum sensor_source source;
+	enum sensor_if sensor_if;
+	enum event_format format;
+};
+
 typedef int (*psee_write_reg)(void *hdl, u32 reg, const u32 val);
 typedef int (*psee_read_reg)(void *hdl, u32 reg, u32 *val);
 
@@ -42,6 +67,20 @@ struct psee_ctrl_ops {
 	psee_write_reg write_reg;
 	psee_read_reg read_reg;
 	void *hdl;
+};
+
+enum mipi_frame_format {
+	VARIABLE_SIZE,
+	VARIABLE_CONTENT_SIZE,
+	VARIABLE_TIMING,
+};
+
+
+struct mipi_config {
+	u32 num_lanes;
+	u32 bit_rate;
+	bool stats_en;
+	enum mipi_frame_format format;
 };
 
 struct row {
@@ -65,6 +104,8 @@ struct psee_controls {
 	struct bias_config bias; // Bias
 	struct roi_window_config roi_window;   // ROI/CROP
 	struct erc_config erc;   // Event Rate Controller
+	struct core_config core;
+	struct mipi_config mipi;
 	struct roi_pixel_config roi_pixel;
 
 	// hardware control

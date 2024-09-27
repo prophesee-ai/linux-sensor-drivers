@@ -163,11 +163,13 @@ static void roi_pixel_ctrl_init(const struct v4l2_ctrl *ctrl, u32 idx,
 				union v4l2_ctrl_ptr ptr)
 {
 	struct grid *grid = (struct grid *)ptr.p;
+	struct v4l2_mbus_framefmt format;
 	u32 y;
 
 	// TODO: get resolution from driver ?
-	grid->width = 320;
-	grid->height = 320;
+	psee_get_format(ctrl_to_pcw(ctrl), &format);
+	grid->width = format.width;
+	grid->height = format.height;
 
 	for (y = 0; y < grid->height; y++)  {
 		memset(&grid->rows[y].vectors, 0xFF, (grid->width / 32));
@@ -185,8 +187,10 @@ static int roi_pixel_ctrl_validate(const struct v4l2_ctrl *ctrl, u32 idx,
 {
 	struct psee_v4l2_ctrl_wrapper *pcw = ctrl_to_pcw(ctrl);
 	struct grid *grid = (struct grid *)ctrl->p_new.p;
+	struct v4l2_mbus_framefmt format;
 
-	if (grid->width != 320 && grid->height != 320)
+	psee_get_format(pcw, &format);
+	if (grid->width != format.width && grid->height != format.height)
 		return 1;
 
 	return 0;
@@ -324,6 +328,14 @@ static int build_bias_ctrls(struct psee_v4l2_ctrl_wrapper *pcw, const struct v4l
 	}
 
 	return num_bias;
+}
+
+int psee_get_format(struct psee_v4l2_ctrl_wrapper *pcw, struct v4l2_mbus_framefmt *format)
+{
+	call_core_op(pcw, get_width, &format->width);
+	call_core_op(pcw, get_height, &format->height);
+
+	return 0;
 }
 
 int psee_init_controls(struct psee_v4l2_ctrl_wrapper *pcw, const struct psee_ctrl_ops *ctrl_ops,

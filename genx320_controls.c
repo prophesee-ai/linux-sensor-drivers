@@ -7,6 +7,8 @@
 #include "drivers/genx320/genx320_roi_pixel.h"
 #include "drivers/genx320/genx320_erc.h"
 #include "drivers/genx320/genx320_bias.h"
+#include "drivers/genx320/genx320_mipi.h"
+#include "drivers/genx320/genx320.h"
 
 static struct psee_roi_master_ops genx320_roi_window_ops = {
 	.init = genx320_roi_window_init,
@@ -49,8 +51,22 @@ static struct psee_esp_ops genx320_esp_ops = {
 	.roi_pixel = &genx320_roi_pixel_ops,
 };
 
+static struct psee_mipi_ops genx320_mipi_ops = {
+	.configure = genx320_mipi_configure,
+};
+
+static struct psee_core_ops genx320_core_ops = {
+	.start = genx320_start_streaming,
+	.stop = genx320_stop_streaming,
+	.s_format = genx320_set_event_format,
+	.get_width = genx320_get_width,
+	.get_height = genx320_get_height,
+};
+
 static struct psee_ops genx320_ops = {
 	.esp = &genx320_esp_ops,
+	.mipi = &genx320_mipi_ops,
+	.core = &genx320_core_ops,
 };
 
 int genx320_init_controls(struct genx320 *genx320, const struct psee_ctrl_ops *ctrl_ops)
