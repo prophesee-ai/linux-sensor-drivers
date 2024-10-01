@@ -33,7 +33,6 @@ struct genx320 {
 
 	s64 link_freq;
 	u32 format_code;
-	bool streaming;
 };
 
 #endif

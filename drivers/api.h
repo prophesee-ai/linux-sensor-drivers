@@ -45,6 +45,7 @@ enum sensor_source {
 	SENSOR_SOURCE_PIXEL_ARRAY = 0,
 	SENSOR_SOURCE_RO_PATTERN,
 	SENSOR_SOURCE_IF_PATTERN, // CPI/MIPI patterns
+	SENSOR_SOURCE_TS_PATTERN,
 };
 
 enum event_format {

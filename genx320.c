@@ -497,7 +497,6 @@ static int genx320_init(struct genx320 *genx320)
 	struct core_config *core = &genx320->pcw.controls.core;
 	struct psee_v4l2_ctrl_wrapper *pcw = &genx320->pcw;
 
-	dev_err(genx320->pcw.dev, "genx320_init\n");
 	// default config
 	core->source = SENSOR_SOURCE_PIXEL_ARRAY;
 	core->sensor_if = SENSOR_IF_MIPI;
@@ -542,7 +541,10 @@ static int genx320_init(struct genx320 *genx320)
  */
 static int genx320_start_streaming(struct genx320 *genx320)
 {
+	struct psee_v4l2_ctrl_wrapper *pcw = &genx320->pcw;
+	struct core_config *config = &pcw->controls.core;
 	int ret = 0;
+
 
 	ret = __v4l2_ctrl_handler_setup(&genx320->pcw.hdl);
 	if (ret < 0) {
@@ -561,15 +563,10 @@ static int genx320_start_streaming(struct genx320 *genx320)
  */
 static int genx320_stop_streaming(struct genx320 *genx320)
 {
-	// roi_ctrl roi_ctrl;
 	ro_td_ctrl ro_td_ctrl;
 	ro_lp_ctrl ro_lp_ctrl;
 	ro_time_base_ctrl ro_time_base_ctrl;
 	mipi_csi_ctrl mipi_csi_ctrl;
-
-	// RET_ON(genx320_read(genx320, roi_ctrl_address, &roi_ctrl.raw));
-	// roi_ctrl.px_sw_rstn = 0;
-	// RET_ON(genx320_write(genx320, roi_ctrl_address, roi_ctrl.raw));
 
 	RET_ON(genx320_read(genx320, ro_td_ctrl_address, &ro_td_ctrl.raw));
 	ro_td_ctrl.ro_td_ack_y_rstn = 0;
@@ -585,7 +582,6 @@ static int genx320_stop_streaming(struct genx320 *genx320)
 
 	msleep(1);
 
-	// genx320_write(genx320, 0x9008, 0x00000194);
 	RET_ON(genx320_read(genx320, ro_time_base_ctrl_address, &ro_time_base_ctrl.raw));
 	ro_time_base_ctrl.time_base_enable = 0;
 	RET_ON(genx320_write(genx320, ro_time_base_ctrl_address, ro_time_base_ctrl.raw));
@@ -611,7 +607,7 @@ static int genx320_set_stream(struct v4l2_subdev *sd, int enable)
 
 	mutex_lock(&genx320->mutex);
 
-	if (genx320->streaming == enable) {
+	if (genx320->pcw.streaming == enable) {
 		mutex_unlock(&genx320->mutex);
 		return 0;
 	}
@@ -629,7 +625,7 @@ static int genx320_set_stream(struct v4l2_subdev *sd, int enable)
 		pm_runtime_put(genx320->pcw.dev);
 	}
 
-	genx320->streaming = enable;
+	genx320->pcw.streaming = enable;
 
 	mutex_unlock(&genx320->mutex);
 

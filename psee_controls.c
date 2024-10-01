@@ -78,6 +78,40 @@ static const struct v4l2_ctrl_ops esp_ctrl_ops = {
 	.s_ctrl = s_esp_ctrl,
 };
 
+static int stream_src_s_ctrl(struct v4l2_ctrl *ctrl)
+{
+	struct psee_v4l2_ctrl_wrapper *pcw = ctrl_to_pcw(ctrl);
+	struct core_config *core = &pcw->controls.core;
+
+	if (pcw->streaming) {
+		dev_err(pcw->sd.dev, "Cannot change source while streaming\n");
+		return -EBUSY;
+	}
+
+	switch (ctrl->val) {
+	case PIXEL_ARRAY:
+		core->source = SENSOR_SOURCE_PIXEL_ARRAY;
+		break;
+	case TIMEBASE_ONLY:
+		core->source = SENSOR_SOURCE_TS_PATTERN;
+		break;
+	case RO_PATTERN:
+		core->source = SENSOR_SOURCE_RO_PATTERN;
+		break;
+	case IF_PATTERN:
+		dev_err(pcw->sd.dev, "IF Pattern not yet implemented\n");
+		return -EINVAL;
+	default:
+		dev_err(pcw->sd.dev, "Invalid streaming source\n");
+		return -EINVAL;
+	}
+	return 0;
+}
+
+static const struct v4l2_ctrl_ops stream_src_ctrl_ops = {
+	.s_ctrl = stream_src_s_ctrl,
+};
+
 static bool roi_ctrl_equal(const struct v4l2_ctrl *ctrl, u32 idx,
 			   union v4l2_ctrl_ptr ptr1,
 			   union v4l2_ctrl_ptr ptr2)
@@ -265,6 +299,23 @@ struct v4l2_ctrl_config erc_enable_ctrl = {
 	.step = 1,
 };
 
+static const char * const event_source_name[] = {
+	"Pixel Array",
+	"Time base",
+	"Readout Pattern",
+	"IF Pattern",
+};
+
+// struct v4l2_ctrl_config stream_src = {
+//     .id = V4L2_CID_TEST_PATTERN,
+//     .ops = stream_src_ops,
+//     .type = V4L2_CTRL_TYPE_MENU,
+//     .max = ARRAY_SIZE(event_source_name) - 1,
+//     .def = PIXEL_ARRAY,
+//     .menu_skip_mask = 0,
+//     .qmenu = event_source_name,
+// }
+
 // TODO: get values from driver
 #define ERC_REF_PERIOD_DEFAULT 100
 #define ERC_TD_EVENT_COUNT_MAX 20000ll
@@ -353,6 +404,13 @@ int psee_init_controls(struct psee_v4l2_ctrl_wrapper *pcw, const struct psee_ctr
 
 	if (!pcw->ops || !pcw->ops->esp)
 		return -EINVAL;
+
+	pcw->stream_ctrl = v4l2_ctrl_new_std_menu_items(
+		hdl,
+		&stream_src_ctrl_ops,
+		V4L2_CID_TEST_PATTERN,
+		ARRAY_SIZE(event_source_name) - 1,
+		0, PIXEL_ARRAY, event_source_name);
 
 	if (pcw->ops->esp->roi_window) {
 		v4l2_ctrl_new_custom(hdl, &roi_reset, NULL);

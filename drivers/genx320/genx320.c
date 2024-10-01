@@ -70,8 +70,14 @@ int genx320_start_pixel_array(struct psee_controls *controls)
 {
 	struct psee_ctrl_ops ctrl = controls->dev_ctrl;
 
+	ro_readout_ctrl ro_readout_ctrl;
 	ro_td_ctrl ro_td_ctrl;
 	roi_ctrl roi_ctrl;
+
+	RET_ON(read_register(ctrl, ro_readout_ctrl, &ro_readout_ctrl.raw));
+	ro_readout_ctrl.ro_self_test_en = 0;
+	ro_readout_ctrl.ro_digital_pipe_en = 1;
+	RET_ON(write_register(ctrl, ro_readout_ctrl, ro_readout_ctrl.raw));
 
 	RET_ON(read_register(ctrl, ro_td_ctrl, &ro_td_ctrl.raw));
 	ro_td_ctrl.ro_td_ack_y_rstn = 1;
@@ -91,11 +97,21 @@ int genx320_start_ro_pattern(struct psee_controls *controls)
 {
 	struct psee_ctrl_ops ctrl = controls->dev_ctrl;
 	ro_readout_ctrl ro_readout_ctrl;
+	ro_td_ctrl ro_td_ctrl;
 
 	RET_ON(read_register(ctrl, ro_readout_ctrl, &ro_readout_ctrl.raw));
 	ro_readout_ctrl.ro_self_test_en = 1;
-	ro_readout_ctrl.ro_digital_pipe_en = 0;
+	ro_readout_ctrl.ro_digital_pipe_en = 1;
 	RET_ON(write_register(ctrl, ro_readout_ctrl, ro_readout_ctrl.raw));
+	return 0;
+}
+
+int genx320_start_ts_pattern(struct psee_controls *controls)
+{
+	struct psee_ctrl_ops ctrl = controls->dev_ctrl;
+	ro_td_ctrl ro_td_ctrl;
+
+	RET_ON(write_register(ctrl, ro_readout_ctrl, (u32)0));
 	return 0;
 }
 
@@ -129,6 +145,8 @@ int genx320_start_streaming(struct psee_controls *controls)
 		return genx320_start_pixel_array(controls);
 	case SENSOR_SOURCE_RO_PATTERN:
 		return genx320_start_ro_pattern(controls);
+	case SENSOR_SOURCE_TS_PATTERN:
+		return genx320_start_ts_pattern(controls);
 	case SENSOR_SOURCE_IF_PATTERN:
 		switch (config->sensor_if) {
 		case SENSOR_IF_MIPI:
