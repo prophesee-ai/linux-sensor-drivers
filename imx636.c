@@ -377,6 +377,8 @@ static int imx636_read_reg(struct imx636 *imx636, u32 reg, u32 len, u32 *val)
 	struct i2c_msg xfer[2] = {0};
 	int i, ret;
 
+
+	dev_dbg(imx636->dev, "reading %d registers at 0x%x", len, reg);
 	xfer[0].addr = client->addr;
 	reg = cpu_to_be32(reg);
 	xfer[0].buf = (u8 *)&reg;
@@ -391,8 +393,10 @@ static int imx636_read_reg(struct imx636 *imx636, u32 reg, u32 len, u32 *val)
 		dev_warn(imx636->dev, "read ret %d", ret);
 		ret = (ret < 0) ? ret : -EIO;
 	} else {
-		for (i = 0; i < len; i++)
+		for (i = 0; i < len; i++) {
 			val[i] = be32_to_cpu(val[i]);
+			dev_dbg(imx636->dev, "read 0x%x", val[i]);
+		}
 		ret = 0;
 	}
 
@@ -420,6 +424,7 @@ static int imx636_write_reg(struct imx636 *imx636, u32 reg, const u32 val)
 	xfer.buf = (u8 *)buf;
 	xfer.len = sizeof(buf);
 
+	dev_dbg(imx636->dev, "writing address 0x%06x value 0x%x", reg, val);
 	ret = i2c_transfer(client->adapter, &xfer, 1);
 	if (ret > 0) {
 		ret = 0;
