@@ -552,7 +552,7 @@ static int imx636_apply_format(struct imx636 *imx636, u32 format_code)
 	if (ret)
 		return ret;
 
-	switch (imx636->format_code) {
+	switch (format_code) {
 	case MEDIA_BUS_FMT_PSEE_EVT21:
 	case MEDIA_BUS_FMT_PSEE_EVT21ME:
 		byte_order = IMX636_EOI_BYTE_ORDER_32LE;
