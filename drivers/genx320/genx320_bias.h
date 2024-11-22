@@ -12,35 +12,36 @@
 /// @return 0 on success
 int genx320_bias_init(struct psee_controls *controls);
 
-/// @brief Set the value for a spedific bias
+/// @brief Set the value for a specific bias
 ///
 /// @param config the bias driver main configuration
 /// @param id ID of the bias to query
+/// @param value Value to set
 /// @return 0 on success
 int genx320_bias_set(struct psee_controls *controls, u32 id, u8 value);
 
-/// @brief Get the current value for a spedific bias
+/// @brief Get the current value for a specific bias
 ///
 /// @param config the bias driver main configuration
 /// @param id ID of the bias to query
 /// @return the bias current value
 int genx320_bias_get(struct psee_controls *controls, u32 id);
 
-/// @brief Get the maximum allowed value for a spedific bias
+/// @brief Get the maximum allowed value for a specific bias
 ///
 /// @param config the bias driver main configuration
 /// @param id ID of the bias to query
 /// @return the bias maximum allowed value
 int genx320_bias_get_max(struct psee_controls *controls, u32 id);
 
-/// @brief Get the minimum allowed value for a spedific bias
+/// @brief Get the minimum allowed value for a specific bias
 ///
 /// @param config the bias driver main configuration
 /// @param id ID of the bias to query
 /// @return the bias minimum allowed value
 int genx320_bias_get_min(struct psee_controls *controls, u32 id);
 
-/// @brief Get the default value for a spedific bias
+/// @brief Get the default value for a specific bias
 ///
 /// @param config the bias driver main configuration
 /// @param id ID of the bias to query
