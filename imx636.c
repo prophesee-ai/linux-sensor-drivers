@@ -23,7 +23,6 @@
 #define PIXEL_ARRAY_WIDTH 1280
 #define PIXEL_ARRAY_HEIGHT 720
 
-#define IMX636_NUM_DATA_LANES 2
 #define IMX636_INCLK_RATE 20000000
 
 /* to avoid return value check on each register access */
@@ -325,12 +324,13 @@ static const struct link_timing {
  * @inclk: Sensor input clock
  * @supplies: Regulator supplies
  * @mutex: Mutex for serializing sensor controls
- * @link_timing: Pointer to pre-computed timing for the CSI-2 link
  * @format_code: Media-ctl code of the output format
  * @streaming: Flag indicating streaming state
  * @initialized: Flag to know if controls may be applied
  * @ctrls: structure holding the V4L2 controls
  * @pattern_ctrl: the control setting the pattern to stream
+ * @link_freq_ctrl: the control setting the CSI-2 lanes frequency
+ * @bus_cfg: the fwnode information regarding CSI-2 link
  * @crop: the rectangle requested as region of interest
  */
 struct imx636 {
@@ -342,12 +342,13 @@ struct imx636 {
 	struct clk *inclk;
 	struct regulator_bulk_data supplies[ARRAY_SIZE(imx636_supply_names)];
 	struct mutex mutex;
-	const struct link_timing *timings;
 	u32 format_code;
 	bool streaming;
 	bool initialized;
 	struct v4l2_ctrl_handler ctrls;
 	struct v4l2_ctrl *pattern_ctrl;
+	struct v4l2_ctrl *link_freq_ctrl;
+	struct v4l2_fwnode_endpoint bus_cfg;
 	struct v4l2_rect crop;
 };
 
@@ -825,6 +826,28 @@ static int imx636_get_selection(struct v4l2_subdev *sd,
 	return -EINVAL;
 }
 
+/**
+ * get_dphy_timings() - Get the D-PHY timings for the current lane configuration
+ * @imx636: pointer to imx636 device
+ *
+ * Return: a pointer to the timings, or NULL if none fits
+ */
+static const struct link_timing *get_dphy_timings(struct imx636 *imx636)
+{
+	int i;
+	u64 freq;
+
+	freq = imx636->bus_cfg.link_frequencies[imx636->link_freq_ctrl->val];
+	for (i = 0; i < ARRAY_SIZE(link_timings); i++) {
+		if (freq == link_timings[i].line_freq) {
+			dev_dbg(imx636->dev, "using CSI-2 freq %llu Hz", freq);
+			return &link_timings[i];
+		}
+	}
+
+	dev_dbg(imx636->dev, "requested freq %lld Hz not implemented", freq);
+	return NULL;
+}
 
 /**
  * imx636_reconfigure_csi2_freq() - Reconfigure the clock tree for the selected CSI-2 freq
@@ -838,6 +861,13 @@ static int imx636_reconfigure_csi2_freq(struct imx636 *imx636)
 	 * hardware may require to lower this frequency to preserve data integrity.
 	 */
 	int i;
+	const struct link_timing *timings = get_dphy_timings(imx636);
+
+	if (timings == NULL) {
+		dev_err(imx636->dev, "configured freq %lld Hz not implemented",
+			imx636->bus_cfg.link_frequencies[imx636->link_freq_ctrl->val]);
+		return -EINVAL;
+	}
 
 	/* Disable MIPI CSI-2 */
 	RET_ON(imx636_clear_reg(imx636, IMX636_MIPI_CONTROL, IMX636_MIPI_CSI_ENABLE));
@@ -860,10 +890,10 @@ static int imx636_reconfigure_csi2_freq(struct imx636 *imx636)
 
 	/* reconfigure the PLL */
 	RET_ON(imx636_write_reg(imx636, IMX636_MIPI_PL_RG_5, 2 /* Input divider */));
-	RET_ON(imx636_write_reg(imx636, IMX636_MIPI_PL_RG_6, imx636->timings->pll_fb_div_d));
+	RET_ON(imx636_write_reg(imx636, IMX636_MIPI_PL_RG_6, timings->pll_fb_div_d));
 	RET_ON(imx636_write_reg(imx636, IMX636_GLOBAL_CTRL2,
-		IMX636_DVTOP_DIVIDER(imx636->timings->dvtop_div_d) |
-		IMX636_SYS_CLK_DIVIDER_NEW(imx636->timings->sys_clk_div_d)));
+		IMX636_DVTOP_DIVIDER(timings->dvtop_div_d) |
+		IMX636_SYS_CLK_DIVIDER_NEW(timings->sys_clk_div_d)));
 
 	/* Power up PLL */
 	RET_ON(imx636_write_reg(imx636, IMX636_MIPI_BYTECLK_CTRL, 1));
@@ -890,18 +920,18 @@ static int imx636_reconfigure_csi2_freq(struct imx636 *imx636)
 	RET_ON(imx636_set_reg(imx636, IMX636_GLOBAL_CTRL, IMX636_SYS_CLK_SWITCH_SEL));
 
 	/* Update the D-PHY timings for the new clock configuration */
-	RET_ON(imx636_write_reg(imx636, IMX636_MIPI_TCLKPOST, imx636->timings->tclkpost));
-	RET_ON(imx636_write_reg(imx636, IMX636_MIPI_TCLKPRE, imx636->timings->tclkpre));
-	RET_ON(imx636_write_reg(imx636, IMX636_MIPI_TCLKPREPARE, imx636->timings->tclkprepare));
-	RET_ON(imx636_write_reg(imx636, IMX636_MIPI_TCLKTRAIL, imx636->timings->tclktrail));
-	RET_ON(imx636_write_reg(imx636, IMX636_MIPI_TCLKZERO, imx636->timings->tclkzero));
-	RET_ON(imx636_write_reg(imx636, IMX636_MIPI_THSEXIT, imx636->timings->thsexit));
-	RET_ON(imx636_write_reg(imx636, IMX636_MIPI_THSPREPARE, imx636->timings->thsprepare));
-	RET_ON(imx636_write_reg(imx636, IMX636_MIPI_THSZERO, imx636->timings->thszero));
-	RET_ON(imx636_write_reg(imx636, IMX636_MIPI_THSTRAIL, imx636->timings->thstrail));
-	RET_ON(imx636_write_reg(imx636, IMX636_MIPI_TLPX, imx636->timings->tlpx));
-	RET_ON(imx636_write_reg(imx636, IMX636_MIPI_TXCLKESC_FREQ, imx636->timings->txclkesc_freq));
-	RET_ON(imx636_write_reg(imx636, IMX636_MIPI_DPHY_PLL_DIV, imx636->timings->dphy_clk_div));
+	RET_ON(imx636_write_reg(imx636, IMX636_MIPI_TCLKPOST, timings->tclkpost));
+	RET_ON(imx636_write_reg(imx636, IMX636_MIPI_TCLKPRE, timings->tclkpre));
+	RET_ON(imx636_write_reg(imx636, IMX636_MIPI_TCLKPREPARE, timings->tclkprepare));
+	RET_ON(imx636_write_reg(imx636, IMX636_MIPI_TCLKTRAIL, timings->tclktrail));
+	RET_ON(imx636_write_reg(imx636, IMX636_MIPI_TCLKZERO, timings->tclkzero));
+	RET_ON(imx636_write_reg(imx636, IMX636_MIPI_THSEXIT, timings->thsexit));
+	RET_ON(imx636_write_reg(imx636, IMX636_MIPI_THSPREPARE, timings->thsprepare));
+	RET_ON(imx636_write_reg(imx636, IMX636_MIPI_THSZERO, timings->thszero));
+	RET_ON(imx636_write_reg(imx636, IMX636_MIPI_THSTRAIL, timings->thstrail));
+	RET_ON(imx636_write_reg(imx636, IMX636_MIPI_TLPX, timings->tlpx));
+	RET_ON(imx636_write_reg(imx636, IMX636_MIPI_TXCLKESC_FREQ, timings->txclkesc_freq));
+	RET_ON(imx636_write_reg(imx636, IMX636_MIPI_DPHY_PLL_DIV, timings->dphy_clk_div));
 
 	/* Power up D-PHY */
 	/* The LDOs are still up, no need to re-enable them */
@@ -1137,12 +1167,9 @@ static int imx636_detect(struct imx636 *imx636)
 static int imx636_parse_hw_config(struct imx636 *imx636)
 {
 	struct fwnode_handle *fwnode = dev_fwnode(imx636->dev);
-	struct v4l2_fwnode_endpoint bus_cfg = {
-		.bus_type = V4L2_MBUS_CSI2_DPHY
-	};
 	struct fwnode_handle *ep;
 	unsigned long rate;
-	unsigned int i, j;
+	unsigned int i;
 	int ret;
 
 	if (!fwnode)
@@ -1191,42 +1218,31 @@ static int imx636_parse_hw_config(struct imx636 *imx636)
 	if (!ep)
 		return -ENXIO;
 
-	ret = v4l2_fwnode_endpoint_alloc_parse(ep, &bus_cfg);
+	imx636->bus_cfg.bus_type = V4L2_MBUS_CSI2_DPHY;
+	ret = v4l2_fwnode_endpoint_alloc_parse(ep, &imx636->bus_cfg);
 	fwnode_handle_put(ep);
 	if (ret)
 		return ret;
 
-	if (bus_cfg.bus.mipi_csi2.num_data_lanes != IMX636_NUM_DATA_LANES) {
+	/* lane selection is not implemented yet, use all lanes */
+	if (imx636->bus_cfg.bus.mipi_csi2.num_data_lanes != 2) {
 		dev_err(imx636->dev,
 			"number of CSI2 data lanes %d is not supported",
-			bus_cfg.bus.mipi_csi2.num_data_lanes);
+			imx636->bus_cfg.bus.mipi_csi2.num_data_lanes);
 		ret = -EINVAL;
 		goto done_endpoint_free;
 	}
 
-	if (!bus_cfg.nr_of_link_frequencies) {
+	if (!imx636->bus_cfg.nr_of_link_frequencies) {
 		dev_err(imx636->dev, "no link frequencies defined");
 		ret = -EINVAL;
 		goto done_endpoint_free;
 	}
 
-	for (i = 0; i < bus_cfg.nr_of_link_frequencies; i++) {
-		for (j = 0; j < ARRAY_SIZE(link_timings); j++) {
-			if (bus_cfg.link_frequencies[i] == link_timings[j].line_freq) {
-				imx636->timings = &link_timings[j];
-				dev_info(imx636->dev, "Using CSI-2 freq %lld",
-					imx636->timings->line_freq);
-				goto done_endpoint_free;
-			}
-		}
-	}
-
-	dev_err(imx636->dev, "none of the link frequencies is supported");
-	ret = -EINVAL;
+	return ret;
 
 done_endpoint_free:
-	v4l2_fwnode_endpoint_free(&bus_cfg);
-
+	v4l2_fwnode_endpoint_free(&imx636->bus_cfg);
 	return ret;
 }
 
@@ -1384,26 +1400,32 @@ static int imx636_power_on(struct device *dev)
 	int ret;
 
 	mutex_lock(&imx636->mutex);
+	dev_dbg(dev, "power-on sequence started");
 
 	ret = enable_power_and_clock(imx636);
 	if (ret)
 		goto error_enable_power_and_clock;
+	dev_dbg(dev, "power supplies and clocks enabled");
 
 	ret = imx636_check_boot(imx636);
 	if (ret)
 		goto error_checking_boot;
+	dev_dbg(dev, "boot magic check passed");
 
 	ret = imx636_init(imx636);
 	if (ret)
 		goto error_init;
+	dev_dbg(dev, "base configuration done");
 
 	ret = __v4l2_ctrl_handler_setup(imx636->sd.ctrl_handler);
 	if (ret)
 		goto error_v4l2_ctrl_handler_setup;
+	dev_dbg(dev, "V4L2 controls applied");
 
 	ret = imx636_set_roi_rect(imx636, &imx636->crop);
 	if (ret)
 		goto error_set_roi_rect;
+	dev_dbg(dev, "region of interest applied");
 
 	mutex_unlock(&imx636->mutex);
 	return 0;
@@ -1653,6 +1675,79 @@ static const struct v4l2_ctrl_ops test_pattern_ctrl_ops = {
 	.s_ctrl = pattern_s_ctrl,
 };
 
+/* -----------------------------------------------------------------------------
+ * CSI-2 lanes frequency control
+ */
+
+static int link_freq_s_ctrl(struct v4l2_ctrl *ctrl)
+{
+	struct imx636 *imx636 =
+		container_of(ctrl->handler, struct imx636, ctrls);
+
+	/* This affects the whole clock tree, don't change after init */
+	/* pm_runtime is checked, rather than imx636->initialized, to avoid
+	 * this condition to be triggered when restoring controls at pm_resume
+	 */
+	if (pm_runtime_active(imx636->dev))
+		return -EBUSY;
+
+	/* Check if we get timings with the new frequency */
+	if (get_dphy_timings(imx636) == NULL) {
+		dev_dbg(imx636->dev,
+			"CSI-2 requested freq %d not supported by the driver",
+			ctrl->val);
+		return -EINVAL;
+	}
+
+	/* This control is directly read from init, nothing to be done here */
+	return 0;
+}
+
+static const struct v4l2_ctrl_ops csi2_freq_ops = {
+	.s_ctrl = link_freq_s_ctrl,
+};
+
+/**
+ * create_link_freq_control() - Create V4L2 control for the CSI-2 link freq
+ * @imx636: pointer to the imx636 device with an initialized control handler
+ *
+ * Return: 0 if successful, error code otherwise.
+ */
+static int create_link_freq_control(struct imx636 *imx636)
+{
+	int link_freq_index = -1;
+	unsigned int i, j;
+
+	/* Look for a valid default value */
+	for (i = 0; i < imx636->bus_cfg.nr_of_link_frequencies; i++) {
+		u64 freq = imx636->bus_cfg.link_frequencies[i];
+
+		for (j = 0; j < ARRAY_SIZE(link_timings); j++) {
+			if (link_timings[j].line_freq == freq) {
+				if (link_freq_index < 0)
+					link_freq_index = i;
+				dev_dbg(imx636->dev, "CSI-2 freq %lld", freq);
+			}
+		}
+	}
+
+	/* If none of the HW link freq is supported */
+	if (link_freq_index < 0) {
+		dev_info(imx636->dev, "CSI-2 freq listed in DTS not supported");
+		return -EINVAL;
+	}
+
+	imx636->link_freq_ctrl = v4l2_ctrl_new_int_menu(
+		imx636->sd.ctrl_handler,
+		&csi2_freq_ops,
+		V4L2_CID_LINK_FREQ,
+		imx636->bus_cfg.nr_of_link_frequencies - 1,
+		link_freq_index,
+		(s64 *)imx636->bus_cfg.link_frequencies);
+
+	/* This may return a false error if a previous ctrl creation failed */
+	return imx636->sd.ctrl_handler->error;
+}
 
 /**
  * imx636_probe() - I2C client device binding
@@ -1729,6 +1824,8 @@ static int imx636_probe(struct i2c_client *client)
 		ARRAY_SIZE(event_source_name) - 1,
 		0, PIXEL_ARRAY, event_source_name);
 
+	create_link_freq_control(imx636);
+
 	ret = v4l2_async_register_subdev_sensor(&imx636->sd);
 	if (ret < 0) {
 		dev_err(imx636->dev,
@@ -1777,6 +1874,7 @@ static void imx636_remove(struct i2c_client *client)
 		imx636_power_off(&client->dev);
 	pm_runtime_set_suspended(&client->dev);
 
+	v4l2_fwnode_endpoint_free(&imx636->bus_cfg);
 	mutex_destroy(&imx636->mutex);
 }
 
