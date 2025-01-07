@@ -18,6 +18,7 @@
 #include <media/v4l2-ctrls.h>
 #include <media/v4l2-fwnode.h>
 #include <media/v4l2-subdev.h>
+#include <media/v4l2-event.h>
 #include "psee-format.h"
 
 #define PIXEL_ARRAY_WIDTH 1280
@@ -1278,6 +1279,8 @@ static const struct v4l2_subdev_video_ops imx636_video_ops = {
 };
 
 static const struct v4l2_subdev_core_ops imx636_core_ops = {
+	.subscribe_event = v4l2_ctrl_subdev_subscribe_event,
+	.unsubscribe_event = v4l2_event_subdev_unsubscribe,
 #ifdef CONFIG_VIDEO_ADV_DEBUG
 	.g_register = imx636_g_register,
 	.s_register = imx636_s_register,
@@ -1799,6 +1802,7 @@ static int imx636_probe(struct i2c_client *client)
 
 	/* Initialize subdev */
 	imx636->sd.flags |= V4L2_SUBDEV_FL_HAS_DEVNODE;
+	imx636->sd.flags |= V4L2_SUBDEV_FL_HAS_EVENTS;
 	imx636->sd.entity.function = MEDIA_ENT_F_CAM_SENSOR;
 
 	v4l2_i2c_subdev_set_name(&imx636->sd, client, name, NULL);
