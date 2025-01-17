@@ -24,6 +24,10 @@
 #define PIXEL_ARRAY_WIDTH 1280
 #define PIXEL_ARRAY_HEIGHT 720
 
+/* ROM settings */
+#define CSI2_PACKET_SIZE 8192
+#define CSI2_PACKETS_PER_FRAME 196
+
 #define IMX636_INCLK_RATE 20000000
 
 /* to avoid return value check on each register access */
@@ -529,9 +533,9 @@ static int imx636_enum_frame_size(struct v4l2_subdev *sd,
 	if (fsize->index != 0)
 		return -EINVAL;
 
-	fsize->min_width = PIXEL_ARRAY_WIDTH;
+	fsize->min_width = CSI2_PACKET_SIZE;
 	fsize->max_width = fsize->min_width;
-	fsize->min_height = PIXEL_ARRAY_HEIGHT;
+	fsize->min_height = CSI2_PACKETS_PER_FRAME;
 	fsize->max_height = fsize->min_height;
 
 	return 0;
@@ -599,8 +603,8 @@ static void imx636_fill_pad_format(struct imx636 *imx636,
 				   u32 code,
 				   struct v4l2_subdev_format *fmt)
 {
-	fmt->format.width = PIXEL_ARRAY_WIDTH;
-	fmt->format.height = PIXEL_ARRAY_HEIGHT;
+	fmt->format.width = CSI2_PACKET_SIZE;
+	fmt->format.height = CSI2_PACKETS_PER_FRAME;
 	fmt->format.code = code;
 	fmt->format.field = V4L2_FIELD_NONE;
 	fmt->format.colorspace = V4L2_COLORSPACE_RAW;
