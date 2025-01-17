@@ -24,9 +24,8 @@
 #define PIXEL_ARRAY_WIDTH 1280
 #define PIXEL_ARRAY_HEIGHT 720
 
-/* ROM settings */
-#define CSI2_PACKET_SIZE 8192
-#define CSI2_PACKETS_PER_FRAME 196
+#define CSI2_PACKET_SIZE 4096
+#define CSI2_PACKETS_PER_FRAME 391
 
 #define IMX636_INCLK_RATE 20000000
 
@@ -227,6 +226,8 @@ union ro_lowpower_ctrl {
 
 #define IMX636_MIPI_ESCAPE_CTRL (MIPI_CSI_BASE + 0x004)
 #define IMX636_MIPI_ESCAPE_CLK_EN BIT(7)
+
+#define IMX636_MIPI_PACKET_SIZE (MIPI_CSI_BASE + 0x020)
 
 #define IMX636_MIPI_PL_RG_1 (MIPI_CSI_BASE + 0x064)
 #define IMX636_MIPI_PL_RG_CKOUTEN BIT(1)
@@ -969,6 +970,7 @@ static int imx636_reconfigure_csi2(struct imx636 *imx636)
 
 	/* Only close packet when MIPI_PACKET_SIZE is reached */
 	RET_ON(imx636_clear_reg(imx636, IMX636_MIPI_CONTROL, IMX636_MIPI_PACKET_TIMEOUT_ENABLE));
+	RET_ON(imx636_write_reg(imx636, IMX636_MIPI_PACKET_SIZE, CSI2_PACKET_SIZE));
 
 	/* Power down CSI-2 and D-PHY */
 	RET_ON(imx636_write_reg(imx636, IMX636_MIPI_STREAM, 0));
