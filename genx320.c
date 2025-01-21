@@ -61,7 +61,7 @@ static const char * const genx320_supply_names[] = {
 };
 
 static const s64 link_freq[] = {
-	800000000,
+	750000000,
 };
 
 /* Supported sensor media formats */
@@ -941,6 +941,7 @@ static const struct psee_ctrl_ops genx320_ctrl_ops = {
 static int genx320_probe(struct i2c_client *client)
 {
 	struct genx320 *genx320;
+	struct v4l2_ctrl *ctrl;
 	const char *name;
 	int ret;
 
@@ -967,6 +968,12 @@ static int genx320_probe(struct i2c_client *client)
 	/* Set default output format */
 	genx320->format_code = supported_formats[1];
 	genx320_init_controls(genx320, &genx320_ctrl_ops);
+
+	/* Advertise the only supported link frequency */
+	ctrl = v4l2_ctrl_new_int_menu(&genx320->pcw.hdl,
+		NULL, V4L2_CID_LINK_FREQ, 0, 0, &link_freq[0]);
+	if (ctrl)
+		ctrl->flags |= V4L2_CTRL_FLAG_READ_ONLY;
 
 	ret = genx320_power_on(genx320->pcw.dev);
 	if (ret) {
