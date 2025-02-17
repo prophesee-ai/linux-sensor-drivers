@@ -137,10 +137,35 @@ union bgen {
 #define EOI_BASE 0x8000
 
 #define IMX636_EOI_PIPELINE_CONTROL (EOI_BASE + 0x000)
-#define IMX636_EOI_BYTE_ORDER_MASK 0xC0
-#define IMX636_EOI_BYTE_ORDER_32LE 0x00
-#define IMX636_EOI_BYTE_ORDER_16LE 0x80
-#define IMX636_EOI_BYTE_ORDER_32BE 0xC0
+union eoi_pipeline_control {
+	struct {
+		u32 enable                    :1;
+		u32 drop_nbackpressure        :1;
+		u32 bypass                    :1;
+		u32 cfg_output_fifo_bypass    :1;
+		u32 cfg_output_sram_powerdown :1;
+		u32 cfg_packet_enable         :1;
+		u32 cfg_unpacking_byte_order  :2;
+		u32 cfg_output_select         :1;
+		u32 cfg_output_width          :1;
+		u32 cfg_clk_out_en            :1;
+		u32 cfg_clk_control_inversion :1;
+		u32 cfg_clk_out_gating_enable :1;
+		u32 cfg_clk_timeout           :8;
+		u32 cfg_mrc_metadata_msb_en   :1;
+		u32 cfg_mrc_metadata_lsb_en   :1;
+		u32 cfg_mrc_metadata_tl_en    :1;
+	};
+	u32 raw;
+};
+#define IMX636_EOI_BYTE_ORDER_32LE 0
+#define IMX636_EOI_BYTE_ORDER_16BE 1
+#define IMX636_EOI_BYTE_ORDER_16LE 2
+#define IMX636_EOI_BYTE_ORDER_32BE 3
+
+#define IMX636_EOI_METADATA_MSB (EOI_BASE + 0x018)
+
+#define IMX636_EOI_METADATA_LSB (EOI_BASE + 0x01C)
 
 /* RO registers */
 #define RO_BASE 0x9000
@@ -352,6 +377,7 @@ struct imx636 {
 	bool initialized;
 	struct v4l2_ctrl_handler ctrls;
 	struct v4l2_ctrl *pattern_ctrl;
+	struct v4l2_ctrl *eof_marker_ctrl;
 	struct v4l2_ctrl *link_freq_ctrl;
 	struct v4l2_fwnode_endpoint bus_cfg;
 	struct v4l2_rect crop;
@@ -489,6 +515,87 @@ static int imx636_clear_reg(struct imx636 *imx636, u32 reg, const u32 bits)
 	return imx636_set_bitfield(imx636, reg, bits, 0);
 }
 
+/* Some definitions to add 4 or 8 bytes at the end of CSI-2 frames */
+enum eof_marker_type {
+	NO_EOF,
+	EOF_32BIT,
+	EOF_32BIT_WITH_TIMEBASE,
+	EOF_64BIT,
+	EOF_64BIT_WITH_TIMEBASE,
+};
+
+static const char * const eof_marker_type_name[] = {
+	"None",
+	"32-bit",
+	"32-bit with timebase",
+	"64-bit",
+	"64-bit with timebase",
+};
+
+/**
+ * eoi_pipeline_control_cfg() - Compute the value for EOI pipeline control
+ * @imx636: pointer to imx636 device
+ *
+ * Return: the raw 32-bit value to write in the register
+ */
+static u32 eoi_pipeline_control_cfg(struct imx636 *imx636)
+{
+	union eoi_pipeline_control pipeline_control = {
+		.enable = 1,
+		.drop_nbackpressure = 0,
+		.bypass = 1, /* seems weird but that's how it works */
+		.cfg_output_fifo_bypass = 0,
+		.cfg_output_sram_powerdown = 0,
+		.cfg_packet_enable = 0,
+		.cfg_output_select = 0,
+		.cfg_clk_out_en = 0,
+	};
+
+
+	/* From CSI-2 point of view, the data is always
+	 * "User Defined 8-bit Data Type 1"
+	 * (cf Section 11.5 of CSI-2 Specification).
+	 * To ease the decoding, the sensor reorders multi-byte data to match
+	 * receiver byte-ordering.
+	 */
+#ifdef __BIG_ENDIAN
+	/* On Big-endian architectures, no reordering should be necessary */
+	pipeline_control.cfg_unpacking_byte_order = IMX636_EOI_BYTE_ORDER_32BE;
+#else
+	/* On Little-endian, 16-bit data shall be kept in order */
+	if (imx636->format_code == MEDIA_BUS_FMT_PSEE_EVT3) {
+		pipeline_control.cfg_unpacking_byte_order = IMX636_EOI_BYTE_ORDER_16LE;
+	} else {
+		/* Evt2.0 or 2.1 */
+		pipeline_control.cfg_unpacking_byte_order = IMX636_EOI_BYTE_ORDER_32LE;
+	}
+#endif
+
+	if (imx636->eof_marker_ctrl->val == NO_EOF) {
+		pipeline_control.cfg_mrc_metadata_msb_en = 0;
+		pipeline_control.cfg_mrc_metadata_lsb_en = 0;
+		pipeline_control.cfg_mrc_metadata_tl_en = 0;
+	} else if (imx636->eof_marker_ctrl->val == EOF_32BIT) {
+		pipeline_control.cfg_mrc_metadata_msb_en = 1;
+		pipeline_control.cfg_mrc_metadata_lsb_en = 0;
+		pipeline_control.cfg_mrc_metadata_tl_en = 0;
+	} else if (imx636->eof_marker_ctrl->val == EOF_32BIT_WITH_TIMEBASE) {
+		pipeline_control.cfg_mrc_metadata_msb_en = 1;
+		pipeline_control.cfg_mrc_metadata_lsb_en = 0;
+		pipeline_control.cfg_mrc_metadata_tl_en = 1;
+	} else if (imx636->eof_marker_ctrl->val == EOF_64BIT) {
+		pipeline_control.cfg_mrc_metadata_msb_en = 1;
+		pipeline_control.cfg_mrc_metadata_lsb_en = 1;
+		pipeline_control.cfg_mrc_metadata_tl_en = 0;
+	} else if (imx636->eof_marker_ctrl->val == EOF_64BIT_WITH_TIMEBASE) {
+		pipeline_control.cfg_mrc_metadata_msb_en = 1;
+		pipeline_control.cfg_mrc_metadata_lsb_en = 1;
+		pipeline_control.cfg_mrc_metadata_tl_en = 1;
+	}
+
+	return pipeline_control.raw;
+}
+
 /**
  * imx636_enum_mbus_code() - Enumerate V4L2 sub-device mbus codes
  * @sd: pointer to imx636 V4L2 sub-device structure
@@ -552,43 +659,25 @@ static int imx636_apply_format(struct imx636 *imx636, u32 format_code)
 {
 	int ret;
 	u32 eoi_value;
-	u32 byte_order;
-
-	/* From CSI-2 point of view, the data is always "User Defined 8-bit Data Type 1",
-	 * (cf Section 11.5 of CSI-2 Specification).
-	 * To ease the decoding, the sensor reorders multi-byte data to match receiver
-	 * byte-ordering.
-	 */
-	ret = imx636_read_reg(imx636, IMX636_EOI_PIPELINE_CONTROL, 1, &eoi_value);
-	if (ret)
-		return ret;
+	u32 edf_value;
 
 	switch (format_code) {
 	case MEDIA_BUS_FMT_PSEE_EVT21:
 	case MEDIA_BUS_FMT_PSEE_EVT21ME:
-		byte_order = IMX636_EOI_BYTE_ORDER_32LE;
-		ret = imx636_write_reg(imx636, IMX636_EDF_PIPELINE_CONTROL,
-			IMX636_EDF_PIPELINE_EVT21);
-		if (ret)
-			return ret;
+		edf_value = IMX636_EDF_PIPELINE_EVT21;
 		break;
 	case MEDIA_BUS_FMT_PSEE_EVT3:
-		byte_order = IMX636_EOI_BYTE_ORDER_16LE;
-		ret = imx636_write_reg(imx636, IMX636_EDF_PIPELINE_CONTROL,
-			IMX636_EDF_PIPELINE_EVT3);
-		if (ret)
-			return ret;
+		edf_value = IMX636_EDF_PIPELINE_EVT3;
 		break;
 	default:
 		return -EINVAL;
 	}
 
-	eoi_value &= ~IMX636_EOI_BYTE_ORDER_MASK;
-#ifdef __BIG_ENDIAN
-	/* On Big-endian architectures, no reordering should be necessary */
-	byte_order = IMX636_EOI_BYTE_ORDER_32BE;
-#endif
-	eoi_value |= byte_order;
+	ret = imx636_write_reg(imx636, IMX636_EDF_PIPELINE_CONTROL, edf_value);
+	if (ret)
+		return ret;
+	imx636->format_code = format_code;
+	eoi_value = eoi_pipeline_control_cfg(imx636);
 	return imx636_write_reg(imx636, IMX636_EOI_PIPELINE_CONTROL, eoi_value);
 }
 
@@ -690,9 +779,7 @@ static int imx636_set_pad_format(struct v4l2_subdev *sd,
 		/* Directly apply the format if the sensor is already initialized */
 		if (imx636->initialized)
 			ret = imx636_apply_format(imx636, code);
-
-		/* Don't update format if the sensor access failed */
-		if (!ret)
+		else
 			imx636->format_code = code;
 	}
 	mutex_unlock(&imx636->mutex);
@@ -1660,6 +1747,76 @@ static int create_bias_controls(struct imx636 *imx636)
 }
 
 /* -----------------------------------------------------------------------------
+ * Event Output interface controls
+ */
+
+#define V4L2_CID_EOI_BASE (V4L2_CID_USER_BASE + 0x2000)
+#define V4L2_CID_EOF_MARKER_ENABLE (V4L2_CID_EOI_BASE + 0x0)
+#define V4L2_CID_EOF_MARKER (V4L2_CID_EOI_BASE + 0x1)
+
+static int eoi_s_ctrl(struct v4l2_ctrl *ctrl)
+{
+	struct imx636 *imx636 = ctrl->priv;
+
+	if (!imx636->initialized)
+		return 0;
+
+	switch (ctrl->id) {
+	case V4L2_CID_EOF_MARKER_ENABLE:
+		return imx636_write_reg(imx636,
+				IMX636_EOI_PIPELINE_CONTROL,
+				eoi_pipeline_control_cfg(imx636));
+	case V4L2_CID_EOF_MARKER:
+		RET_ON(imx636_write_reg(imx636,
+					IMX636_EOI_METADATA_MSB,
+					*ctrl->p_new.p_u32));
+		return imx636_write_reg(imx636,
+					IMX636_EOI_METADATA_LSB,
+					*(ctrl->p_new.p_u32 + 1));
+	}
+	return 0;
+}
+
+static const struct v4l2_ctrl_ops eoi_ctrl_ops = {
+	.s_ctrl = eoi_s_ctrl,
+};
+
+static const struct v4l2_ctrl_config eof_marker_enable_cfg = {
+	.ops = &eoi_ctrl_ops,
+	.id = V4L2_CID_EOF_MARKER_ENABLE,
+	.name = "Enable End of Frame marker",
+	.type = V4L2_CTRL_TYPE_MENU,
+	.qmenu = eof_marker_type_name,
+	.menu_skip_mask = 0,
+	.min = 0,
+	.max = ARRAY_SIZE(eof_marker_type_name) - 1,
+};
+
+static const struct v4l2_ctrl_config eof_marker_cfg = {
+	.ops = &eoi_ctrl_ops,
+	.id = V4L2_CID_EOF_MARKER,
+	.name = "End of Frame marker",
+	.type = V4L2_CTRL_TYPE_U32,
+	.min = 0,
+	.def = 0xE019E019,
+	.max = 0xFFFFFFFF,
+	.step = 1,
+	.dims = { 2 },
+};
+
+static void create_end_of_frame_marker_controls(struct imx636 *imx636)
+{
+	imx636->eof_marker_ctrl = v4l2_ctrl_new_custom(
+		imx636->sd.ctrl_handler,
+		&eof_marker_enable_cfg,
+		imx636);
+	v4l2_ctrl_new_custom(
+		imx636->sd.ctrl_handler,
+		&eof_marker_cfg,
+		imx636);
+}
+
+/* -----------------------------------------------------------------------------
  * Test patterns control
  */
 
@@ -1824,6 +1981,7 @@ static int imx636_probe(struct i2c_client *client)
 	v4l2_ctrl_handler_init(&imx636->ctrls, 10);
 	imx636->ctrls.lock = &imx636->mutex;
 	create_bias_controls(imx636);
+	create_end_of_frame_marker_controls(imx636);
 
 	imx636->pattern_ctrl = v4l2_ctrl_new_std_menu_items(
 		imx636->sd.ctrl_handler,
@@ -1833,6 +1991,12 @@ static int imx636_probe(struct i2c_client *client)
 		0, PIXEL_ARRAY, event_source_name);
 
 	create_link_freq_control(imx636);
+
+	if (imx636->sd.ctrl_handler->error) {
+		dev_err(imx636->dev, "failed to create V4L2 controls: %d",
+			imx636->sd.ctrl_handler->error);
+		goto error_create_controls;
+	}
 
 	ret = v4l2_async_register_subdev_sensor(&imx636->sd);
 	if (ret < 0) {
@@ -1855,6 +2019,7 @@ static int imx636_probe(struct i2c_client *client)
 
 error_register_subdev:
 	media_entity_cleanup(&imx636->sd.entity);
+error_create_controls:
 error_init_entity:
 error_detect_imx636:
 	disable_power_and_clock(imx636);
