@@ -1650,7 +1650,7 @@ static int create_bias_controls(struct imx636 *imx636)
 	/* Ordered as in the IMX636 App Note */
 	/* For trimmed value, set default outside [min,max] range */
 	/* Register values for:   def,  min,  max */
-	RET_ON(new_bctrl(imx636, 0x00, 0x2D, 0x6E, V4L2_CID_BIAS_FO));
+	RET_ON(new_bctrl(imx636, 0x00, 0x2D, 0x8C, V4L2_CID_BIAS_FO));
 	RET_ON(new_bctrl(imx636, 0x00, 0x0F, 0xFF, V4L2_CID_BIAS_DIFF_ON));
 	RET_ON(new_bctrl(imx636, 0x54, 0x34, 0x64, V4L2_CID_BIAS_DIFF));
 	RET_ON(new_bctrl(imx636, 0x00, 0x0F, 0xFF, V4L2_CID_BIAS_DIFF_OFF));
