@@ -967,6 +967,9 @@ static int imx636_reconfigure_csi2(struct imx636 *imx636)
 	/* Disable MIPI CSI-2 */
 	RET_ON(imx636_clear_reg(imx636, IMX636_MIPI_CONTROL, IMX636_MIPI_CSI_ENABLE));
 
+	/* Only close packet when MIPI_PACKET_SIZE is reached */
+	RET_ON(imx636_clear_reg(imx636, IMX636_MIPI_CONTROL, IMX636_MIPI_PACKET_TIMEOUT_ENABLE));
+
 	/* Power down CSI-2 and D-PHY */
 	RET_ON(imx636_write_reg(imx636, IMX636_MIPI_STREAM, 0));
 	RET_ON(imx636_clear_reg(imx636, IMX636_MIPI_ESCAPE_CTRL, IMX636_MIPI_ESCAPE_CLK_EN));
