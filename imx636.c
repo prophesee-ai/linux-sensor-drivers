@@ -223,6 +223,7 @@ union ro_lowpower_ctrl {
 
 #define IMX636_MIPI_CONTROL (MIPI_CSI_BASE + 0x000)
 #define IMX636_MIPI_CSI_ENABLE BIT(0)
+#define IMX636_MIPI_PACKET_TIMEOUT_ENABLE BIT(5)
 
 #define IMX636_MIPI_ESCAPE_CTRL (MIPI_CSI_BASE + 0x004)
 #define IMX636_MIPI_ESCAPE_CLK_EN BIT(7)
@@ -357,6 +358,7 @@ static const struct link_timing {
  * @format_code: Media-ctl code of the output format
  * @streaming: Flag indicating streaming state
  * @initialized: Flag to know if controls may be applied
+ * @quirk_fixed_packet_size: Disable packet timeout
  * @ctrls: structure holding the V4L2 controls
  * @pattern_ctrl: the control setting the pattern to stream
  * @link_freq_ctrl: the control setting the CSI-2 lanes frequency
@@ -375,6 +377,7 @@ struct imx636 {
 	u32 format_code;
 	bool streaming;
 	bool initialized;
+	bool quirk_fixed_packet_size;
 	struct v4l2_ctrl_handler ctrls;
 	struct v4l2_ctrl *pattern_ctrl;
 	struct v4l2_ctrl *eof_marker_ctrl;
@@ -942,12 +945,12 @@ static const struct link_timing *get_dphy_timings(struct imx636 *imx636)
 }
 
 /**
- * imx636_reconfigure_csi2_freq() - Reconfigure the clock tree for the selected CSI-2 freq
+ * imx636_reconfigure_csi2() - Set clock tree and selected CSI-2 configuration
  * @imx636: pointer to imx636 device
  *
  * Return: 0 if successful, error code otherwise.
  */
-static int imx636_reconfigure_csi2_freq(struct imx636 *imx636)
+static int imx636_reconfigure_csi2(struct imx636 *imx636)
 {
 	/* The sensor starts with lanes at 1.5Gbps, which provides top performances, but some
 	 * hardware may require to lower this frequency to preserve data integrity.
@@ -1039,6 +1042,12 @@ static int imx636_reconfigure_csi2_freq(struct imx636 *imx636)
 		IMX636_MIPI_RG_BIASEN | IMX636_MIPI_RG_LPREGEN));
 	usleep_range(200, 300);
 
+	if (imx636->quirk_fixed_packet_size) {
+		/* Only close packet when MIPI_PACKET_SIZE is reached */
+		RET_ON(imx636_clear_reg(imx636, IMX636_MIPI_CONTROL,
+			IMX636_MIPI_PACKET_TIMEOUT_ENABLE));
+	}
+
 	/* Re-enable stream and control */
 	RET_ON(imx636_write_reg(imx636, IMX636_MIPI_STREAM, 1));
 	RET_ON(imx636_set_reg(imx636, IMX636_MIPI_CONTROL, IMX636_MIPI_CSI_ENABLE));
@@ -1076,7 +1085,7 @@ static int imx636_tune_analog(struct imx636 *imx636)
  */
 static int imx636_init(struct imx636 *imx636)
 {
-	RET_ON(imx636_reconfigure_csi2_freq(imx636));
+	RET_ON(imx636_reconfigure_csi2(imx636));
 	RET_ON(imx636_tune_analog(imx636));
 	RET_ON(imx636_apply_format(imx636, imx636->format_code));
 	imx636->initialized = true;
@@ -1258,6 +1267,7 @@ static int imx636_detect(struct imx636 *imx636)
  */
 static int imx636_parse_hw_config(struct imx636 *imx636)
 {
+	struct device_node *np = dev_of_node(imx636->dev);
 	struct fwnode_handle *fwnode = dev_fwnode(imx636->dev);
 	struct fwnode_handle *ep;
 	unsigned long rate;
@@ -1309,6 +1319,12 @@ static int imx636_parse_hw_config(struct imx636 *imx636)
 	ep = fwnode_graph_get_next_endpoint(fwnode, NULL);
 	if (!ep)
 		return -ENXIO;
+
+	/* Check if quirks are requested */
+	if (of_property_read_bool(np, "imx636,fixed-packet-size")) {
+		dev_info(imx636->dev, "setting fixed-size packets");
+		imx636->quirk_fixed_packet_size = true;
+	}
 
 	imx636->bus_cfg.bus_type = V4L2_MBUS_CSI2_DPHY;
 	ret = v4l2_fwnode_endpoint_alloc_parse(ep, &imx636->bus_cfg);
