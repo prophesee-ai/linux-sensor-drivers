@@ -16,12 +16,12 @@ Difference with conventional sensors
 ------------------------------------
 
 Leaving aside the image processing algorithms, from a system point of view, in
-an EVS, each pixel produces data asynchrously, as a result, there is no repeted
-data structure, such as the frame in usual, frame-based, vision sensors, and
-there is no fixed-rate output. Instead, there is a stream of independent pixel
-events (usually the pixel coordinates, the polarity of the luminance change
--increasing or decreasing-, and the timestamp of the event, to reject the
-acquisition pipeline jitter when processing the data.
+an EVS, each pixel produces data asynchrously, as a result, there is no
+repeated data structure, such as the frame in usual, frame-based, vision
+sensors, and there is no fixed-rate output. Instead, there is a stream of
+independent pixel events (usually the pixel coordinates, the polarity of the
+luminance change -increasing or decreasing-, and the timestamp of the event,
+to reject the acquisition pipeline jitter when processing the data.
 
 As a consequence, many rules of frame-based sensors do not apply to EVS. To
 expose EVS data to software, some packetization will happen, but it is
@@ -54,7 +54,7 @@ Currently, the driver supports
 - 20MHz input clock
 - MIPI CSI-2 output on 2 lanes (D-PHY)
 - default packetization
-- lanes at 600, 800, 1200 or 1500MHz
+- lanes at 300, 400, 600 or 750MHz
 - data output in EVT 2.1 (with limitations) or EVT 3.0
 - Square region of interest (through crop selection)
 - some test patterns
@@ -79,7 +79,7 @@ it defines them as
 
 The codes have been chosen to reduce the risk of conflict with new
 types that may appear upstream, but are likely to be moved if they are
-themself integrated upstream, requiring a rebuild of the userspace with the new
+integrated upstream, requiring a rebuild of the userspace with the new
 definitions if this happen and a system switch to an upstream kernel.
 
 The EVT 2.1 uses 64-bit events, and EVT 3.0 uses 16-bit events. As the data type
@@ -97,3 +97,11 @@ sent after the other fields on IMX636, swapping the two 32-bit halves of the
 event, resulting in some middle-endian encoding. This behavior is advertised as
 ``PSEE_EVT21ME`` on the driver.
 
+The media bus pixel codes describe image formats as flowing over physical busses.
+The width advertised by the driver on media pads indicates the size of the
+packets sent on the MIPI CSI-2 link, as some receivers need it. It usually
+differs from the sensor pixel matrix width. Then, the height is not directly
+managed by the IMX636. It is just the number of packets in a frame, and since
+this number varies, the height given by the media-ctl pad is just an upper bound
+of that number, so that the actual information never overflows a memory buffer
+allocated by a receiver.

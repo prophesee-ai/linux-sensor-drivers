@@ -25,13 +25,15 @@ configure the IMX636 output format as follow:
 
 .. code-block:: none
 
-	media-ctl -V "'imx636 6-003c':0[fmt:PSEE_EVT21/1280x720]"
+	media-ctl -V "'imx636 6-003c':0[fmt:PSEE_EVT21/8192x196]"
 
 If either ``PSEE_EVT21`` or ``PSEE_EVT21ME`` is requested, the format is set to
 ``PSEE_EVT21ME``, otherwise, ``PSEE_EVT3`` is set.
 
-The geometry of the sensor is fixed (but part of it may be disabled with a crop
-selection).
+The width and height given to media-ctl are the size and number of packets per
+frame on the bus, and are unrelated to the geometry of the sensor.
+The user-space can use the selection API to get the bounds of the encoded
+events.
 
 The packetization on the MIPI CSI-2 link is independent from the pixel array
 size, and the frame rate in the CSI-2 protocol is arbitrary. Those are kept to
@@ -57,13 +59,9 @@ The selection is done directly on the analog pixels, before serialization of the
 events, effectively reducing the activity on the readout -the block that
 serializes and timestamps the events-, but does not alter the coordinates of the
 pixels. With the above selection, events may be generated between pixel(320,120)
-and pixel(959,599). To avoid issues at decoding time, the sensor output remains
-advertised as 1280x720, possibly causing over-reservation of memory, but
-advertising 640x480 size would cause the pixels to be out of the declared size.
-
-This could be fixed using the digital crop, a block that may apply a
-translation on the event coordinates, but the current design allows to modify
-the crop while streaming, without adverse impact on the software processing.
+and pixel(959,599).
+Since cropping has no impact on the data packetization, it is allowed to update
+it while streaming.
 
 Test Patterns
 -------------
@@ -108,4 +106,38 @@ sensor (number of lanes, frequency, inter-packet delays), thus the position of
 the time-high events in the stream, as well as the streaming statistics, are
 not easy to predict, making the pattern not ideal for bit-accurate verification,
 but the presence and the non-repetition of pixel events can be checked, and the
-pattern follows the event protocol makes it displayable.
+pattern follows the event protocol which makes it displayable.
+
+End Of Frame marker
+-------------------
+
+IMX636 outputs data at a variable rate, but performs framing at a fixed rate
+(2ms per frame by default). This means a variable amount of data in each
+frame, however, this is unusual for video sensors, and some receivers use a
+DMA that does not report the actual size of its transfers. For such case,
+IMX636 is able to insert one or two arbitrary 32-bit words before closing
+the CSI-2 frame, allowing software to stop the evaluation of a buffer when
+it sees this marker.
+
+This feature is exposed as two user controls.
+
+enable_end_of_frame_marker (0x00982900)
+'''''''''''''''''''''''''''''''''''''''
+
+This is a menu allowing to insert 32 ou 64 bits, with the option to replace
+some bits in the first word to match the timebase as it would be inserted
+in EVT2.0 or 2.1 formats.
+
+end_of_frame_marker (0x00982901)
+''''''''''''''''''''''''''''''''
+
+This is a u32 array control, with 1 dimension of size 2. This allows to set
+the two words that may be inserted by the sensor. If 64 bits are to be
+inserted, the two u32 will be inserted at the end of the frame in the same
+order as the control, and, within each word, bytes will be re-arranged as
+the actual events data to match the endianness of the system running the
+driver.
+
+By default, both markers are set to 0xE019E019 (but are disabled). This
+value is a valid monitoring event in each data format, that is not used for
+other purposes.
