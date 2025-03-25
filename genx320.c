@@ -386,6 +386,7 @@ static int genx320_configure_mipi(struct genx320 *genx320)
 	mipi->bit_rate = 800;
 	mipi->num_lanes = 1;
 	mipi->stats_en = true;
+	mipi->eof_marker = true;
 
 	RET_ON(call_mipi_op(&genx320->pcw, configure));
 	return 0;

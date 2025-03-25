@@ -81,6 +81,7 @@ struct mipi_config {
 	u32 num_lanes;
 	u32 bit_rate;
 	bool stats_en;
+	bool eof_marker;
 	enum mipi_frame_format format;
 };
 

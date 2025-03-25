@@ -325,6 +325,11 @@ PSEE_REGISTER_DEF(edf_pipeline_control, 0x7000, {
 	u32 bypass :1;
 });
 
+PSEE_REGISTER_DEF(edf_event_injection, 0x7048, {
+	u32 sysmon_end_of_frame_en :1;
+	u32:31;
+});
+
 PSEE_REGISTER_DEF(edf_output_interface_control, 0x704C, {
 	u32:4;
 	u32 start_of_frame_timeout :12;

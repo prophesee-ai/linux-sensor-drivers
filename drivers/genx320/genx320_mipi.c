@@ -98,6 +98,8 @@ int genx320_mipi_configure(struct psee_controls *controls)
 	if (mipi->stats_en)
 		RET_ON(write_field(ctrl, mipi_csi_stat_ctrl, enable, 1));
 
+	RET_ON(write_field(ctrl, edf_event_injection, sysmon_end_of_frame_en, mipi->eof_marker));
+
 	return 0;
 }
 
