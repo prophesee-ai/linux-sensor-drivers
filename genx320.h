@@ -27,6 +27,7 @@ struct genx320 {
 	struct regulator_bulk_data supplies[GENX320_MAX_NUM_SUPPLIES];
 	struct mutex mutex;
 	struct psee_v4l2_ctrl_wrapper pcw;
+	struct v4l2_rect crop;
 
 	s64 link_freq;
 	u32 format_code;

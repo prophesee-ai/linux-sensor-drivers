@@ -21,8 +21,8 @@
 #include "drivers/genx320/genx320_registers.h"
 #include "psee-format.h"
 
-#define GENX320_PIXEL_ARRAY_WIDTH 320U
-#define GENX320_PIXEL_ARRAY_HEIGHT 320U
+#define PIXEL_ARRAY_WIDTH 320
+#define PIXEL_ARRAY_HEIGHT 320
 
 #define GENX320_NUM_DATA_LANES 1
 #define GENX320_INCLK_RATE 20000000
@@ -348,6 +348,81 @@ static int genx320_init_pad_cfg(struct v4l2_subdev *sd,
 	genx320_fill_pad_format(genx320, genx320->format_code, &fmt);
 
 	return genx320_set_pad_format(sd, sd_state, &fmt);
+}
+
+static struct v4l2_rect *
+genx320_get_pad_crop(struct genx320 *genx320,
+		      struct v4l2_subdev_state *sd_state,
+		      unsigned int pad, enum v4l2_subdev_format_whence which)
+{
+	switch (which) {
+	case V4L2_SUBDEV_FORMAT_TRY:
+		return v4l2_subdev_get_try_crop(&genx320->pcw.sd, sd_state, pad);
+	case V4L2_SUBDEV_FORMAT_ACTIVE:
+		return &genx320->crop;
+	}
+
+	return NULL;
+}
+
+static int genx320_set_selection(struct v4l2_subdev *sd,
+				struct v4l2_subdev_state *sd_state,
+				struct v4l2_subdev_selection *sel)
+{
+	struct genx320 *genx320 = to_genx320(sd);
+	struct v4l2_rect *crop;
+	struct roi roi;
+	int ret = 0;
+
+	if (sel->target != V4L2_SEL_TGT_CROP)
+		return -EINVAL;
+
+	mutex_lock(&genx320->mutex);
+	crop = genx320_get_pad_crop(genx320, sd_state, sel->pad, sel->which);
+	crop->left = clamp(sel->r.left, 0, PIXEL_ARRAY_WIDTH - 1);
+	crop->top = clamp(sel->r.top, 0, PIXEL_ARRAY_HEIGHT - 1);
+	crop->width = clamp((s32)sel->r.width, 1, PIXEL_ARRAY_WIDTH - crop->left);
+	crop->height = clamp((s32)sel->r.height, 1, PIXEL_ARRAY_HEIGHT - crop->top);
+
+	if (sel->which == V4L2_SUBDEV_FORMAT_ACTIVE) {
+		roi.x = crop->left;
+		roi.y = crop->top;
+		roi.width = crop->width;
+		roi.height = crop->height;
+		ret = call_esp_op(&genx320->pcw, roi_window, set, &roi, 1);
+	}
+
+	mutex_unlock(&genx320->mutex);
+
+	return ret;
+}
+
+
+static int genx320_get_selection(struct v4l2_subdev *sd,
+				struct v4l2_subdev_state *sd_state,
+				struct v4l2_subdev_selection *sel)
+{
+	switch (sel->target) {
+	case V4L2_SEL_TGT_CROP: {
+		struct genx320 *genx320 = to_genx320(sd);
+
+		mutex_lock(&genx320->mutex);
+		sel->r = *genx320_get_pad_crop(genx320, sd_state, sel->pad,
+		sel->which);
+		mutex_unlock(&genx320->mutex);
+		return 0;
+	}
+
+	case V4L2_SEL_TGT_CROP_DEFAULT:
+	case V4L2_SEL_TGT_NATIVE_SIZE:
+	case V4L2_SEL_TGT_CROP_BOUNDS:
+		sel->r.top = 0;
+		sel->r.left = 0;
+		sel->r.width = PIXEL_ARRAY_WIDTH;
+		sel->r.height = PIXEL_ARRAY_HEIGHT;
+		return 0;
+	}
+	return -EINVAL;
 }
 
 /**
@@ -836,6 +911,8 @@ static const struct v4l2_subdev_pad_ops genx320_pad_ops = {
 	.enum_frame_size = genx320_enum_frame_size,
 	.get_fmt = genx320_get_pad_format,
 	.set_fmt = genx320_set_pad_format,
+	.get_selection = genx320_get_selection,
+	.set_selection = genx320_set_selection,
 };
 
 static const struct v4l2_subdev_ops genx320_subdev_ops = {
