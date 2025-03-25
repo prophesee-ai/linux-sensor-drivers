@@ -47,7 +47,7 @@ int genx320_mipi_set_packet_config(struct psee_controls *controls, enum mipi_fra
 	RET_ON(read_register(ctrl, edf_output_interface_control,
 			    &edf_output_interface_control.raw));
 
-	edf_output_interface_control.start_of_frame_timeout = 0x271;
+	edf_output_interface_control.start_of_frame_timeout = 0xFA;
 
 	RET_ON(write_register(ctrl, edf_output_interface_control,
 			     edf_output_interface_control.raw));

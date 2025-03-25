@@ -225,9 +225,9 @@ static int genx320_enum_frame_size(struct v4l2_subdev *sd,
 	if (fsize->index != 0)
 		return -EINVAL;
 
-	fsize->min_width = GENX320_PIXEL_ARRAY_WIDTH;
+	fsize->min_width = 4096;
 	fsize->max_width = fsize->min_width;
-	fsize->min_height = GENX320_PIXEL_ARRAY_HEIGHT;
+	fsize->min_height = 391;
 	fsize->max_height = fsize->min_height;
 
 	return 0;
@@ -244,8 +244,8 @@ static void genx320_fill_pad_format(struct genx320 *genx320,
 				    u32 code,
 				    struct v4l2_subdev_format *fmt)
 {
-	fmt->format.width = GENX320_PIXEL_ARRAY_WIDTH;
-	fmt->format.height = GENX320_PIXEL_ARRAY_HEIGHT;
+	fmt->format.width = 4096;
+	fmt->format.height = 391;
 	fmt->format.code = code;
 	fmt->format.field = V4L2_FIELD_NONE;
 	fmt->format.colorspace = V4L2_COLORSPACE_RAW;
