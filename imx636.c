@@ -1296,7 +1296,7 @@ static int imx636_parse_hw_config(struct imx636 *imx636)
 	/* Get sensor input clock */
 	imx636->inclk = devm_clk_get(imx636->dev, NULL);
 	if (IS_ERR(imx636->inclk)) {
-		dev_err(imx636->dev, "could not get inclk");
+		dev_dbg(imx636->dev, "could not get inclk");
 		return PTR_ERR(imx636->inclk);
 	}
 
@@ -1955,7 +1955,8 @@ static int imx636_probe(struct i2c_client *client)
 
 	ret = imx636_parse_hw_config(imx636);
 	if (ret) {
-		dev_err(imx636->dev, "HW configuration is not supported");
+		if (ret != -EPROBE_DEFER)
+			dev_err(imx636->dev, "HW configuration is not supported %d", ret);
 		return ret;
 	}
 
