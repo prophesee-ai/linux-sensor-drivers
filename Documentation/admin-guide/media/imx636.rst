@@ -40,6 +40,17 @@ Regarding packetization on the CSI-2, the IMX636 uses both variable packet
 size (one packet being usually one line) and variable number of packet per
 frame.
 
+The hardware description (in the devicetree) allows a
+``imx636,fixed-packet-size`` quirk, to tell the driver to always wait for
+packet completion before sending it. This breaks the latency guarantees
+at packet level, but may be necessary to accommodate the CSI-2 receiver.
+When this option is set, a packet is sent in either of two conditions:
+
+- The packet is full
+- The end of the frame period is reached. In this case, a long packet
+  with a size smaller than the maximum is sent before the small packet
+  signaling the end of frame
+
 For control, the sensor uses I2C with register addresses on 32 bits.
 
 Driver features
