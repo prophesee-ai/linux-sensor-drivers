@@ -49,6 +49,10 @@ properties:
     description: Reference to the GPIO connected to the XCLR pin, if any.
     maxItems: 1
 
+  imx636,fixed-packet-size:
+    type: boolean
+    description: quirk for disabling timeout on packet transmission
+
   port:
     description: MIPI CSI-2 transmitter port
     $ref: /schemas/graph.yaml#/$defs/port-base
