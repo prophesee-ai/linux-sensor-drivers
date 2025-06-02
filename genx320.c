@@ -273,7 +273,7 @@ static int genx320_get_pad_format(struct v4l2_subdev *sd,
 	if (fmt->which == V4L2_SUBDEV_FORMAT_TRY) {
 		struct v4l2_mbus_framefmt *framefmt;
 
-		framefmt = v4l2_subdev_get_try_format(sd, sd_state, fmt->pad);
+		framefmt = v4l2_subdev_state_get_format(sd_state, fmt->pad);
 		fmt->format = *framefmt;
 	} else {
 		genx320_fill_pad_format(genx320, genx320->format_code, fmt);
@@ -320,7 +320,7 @@ static int genx320_set_pad_format(struct v4l2_subdev *sd,
 	if (fmt->which == V4L2_SUBDEV_FORMAT_TRY) {
 		struct v4l2_mbus_framefmt *framefmt;
 
-		framefmt = v4l2_subdev_get_try_format(sd, sd_state, fmt->pad);
+		framefmt = v4l2_subdev_state_get_format(sd_state, fmt->pad);
 		*framefmt = fmt->format;
 	} else {
 		genx320->format_code = code;
@@ -357,7 +357,7 @@ genx320_get_pad_crop(struct genx320 *genx320,
 {
 	switch (which) {
 	case V4L2_SUBDEV_FORMAT_TRY:
-		return v4l2_subdev_get_try_crop(&genx320->pcw.sd, sd_state, pad);
+		return v4l2_subdev_state_get_crop(sd_state, pad);
 	case V4L2_SUBDEV_FORMAT_ACTIVE:
 		return &genx320->crop;
 	}
@@ -913,7 +913,6 @@ static const struct v4l2_subdev_core_ops genx320_core_ops = {
 };
 
 static const struct v4l2_subdev_pad_ops genx320_pad_ops = {
-	.init_cfg = genx320_init_pad_cfg,
 	.enum_mbus_code = genx320_enum_mbus_code,
 	.enum_frame_size = genx320_enum_frame_size,
 	.get_fmt = genx320_get_pad_format,
@@ -926,6 +925,10 @@ static const struct v4l2_subdev_ops genx320_subdev_ops = {
 	.video = &genx320_video_ops,
 	.pad = &genx320_pad_ops,
 	.core = &genx320_core_ops,
+};
+
+static const struct v4l2_subdev_internal_ops genx320_internal_ops = {
+	.init_state = genx320_init_pad_cfg,
 };
 
 /**
@@ -1041,7 +1044,8 @@ static int genx320_probe(struct i2c_client *client)
 
 	/* Initialize subdev */
 	v4l2_i2c_subdev_init(&genx320->pcw.sd, client, &genx320_subdev_ops);
-
+	genx320->pcw.sd.internal_ops = &genx320_internal_ops;
+	
 	ret = genx320_parse_hw_config(genx320);
 	if (ret) {
 		dev_err(genx320->pcw.dev, "HW configuration is not supported");

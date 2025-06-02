@@ -4,7 +4,6 @@
  *
  * Copyright (C) 2023 Prophesee
  */
-#include <asm/unaligned.h>
 
 #include <linux/kconfig.h> /* to detect big-endian builds */
 #include <linux/clk.h>
@@ -726,7 +725,7 @@ static int imx636_get_pad_format(struct v4l2_subdev *sd,
 	if (fmt->which == V4L2_SUBDEV_FORMAT_TRY) {
 		struct v4l2_mbus_framefmt *framefmt;
 
-		framefmt = v4l2_subdev_get_try_format(sd, sd_state, fmt->pad);
+		framefmt = v4l2_subdev_state_get_format(sd_state, fmt->pad);
 		fmt->format = *framefmt;
 	} else {
 		imx636_fill_pad_format(imx636, imx636->format_code, fmt);
@@ -775,7 +774,7 @@ static int imx636_set_pad_format(struct v4l2_subdev *sd,
 	if (fmt->which == V4L2_SUBDEV_FORMAT_TRY) {
 		struct v4l2_mbus_framefmt *framefmt;
 
-		framefmt = v4l2_subdev_get_try_format(sd, sd_state, fmt->pad);
+		framefmt = v4l2_subdev_state_get_format(sd_state, fmt->pad);
 		*framefmt = fmt->format;
 	} else if (imx636->streaming) {
 		/* The output format can't be changed while streaming */
@@ -815,7 +814,7 @@ imx636_get_pad_crop(struct imx636 *imx636,
 {
 	switch (which) {
 	case V4L2_SUBDEV_FORMAT_TRY:
-		return v4l2_subdev_get_try_crop(&imx636->sd, sd_state, pad);
+		return v4l2_subdev_state_get_crop(sd_state, pad);
 	case V4L2_SUBDEV_FORMAT_ACTIVE:
 		return &imx636->crop;
 	}
@@ -1408,7 +1407,6 @@ static const struct v4l2_subdev_core_ops imx636_core_ops = {
 };
 
 static const struct v4l2_subdev_pad_ops imx636_pad_ops = {
-	.init_cfg = imx636_init_pad_cfg,
 	.enum_mbus_code = imx636_enum_mbus_code,
 	.enum_frame_size = imx636_enum_frame_size,
 	.get_fmt = imx636_get_pad_format,
@@ -1421,6 +1419,10 @@ static const struct v4l2_subdev_ops imx636_subdev_ops = {
 	.video = &imx636_video_ops,
 	.pad = &imx636_pad_ops,
 	.core = &imx636_core_ops,
+};
+
+static const struct v4l2_subdev_internal_ops imx636_internal_ops = {
+	.init_state = imx636_init_pad_cfg,
 };
 
 /**
@@ -1965,6 +1967,7 @@ static int imx636_probe(struct i2c_client *client)
 
 	/* Initialize subdev */
 	v4l2_i2c_subdev_init(&imx636->sd, client, &imx636_subdev_ops);
+	imx636->sd.internal_ops = &imx636_internal_ops;
 
 	ret = imx636_parse_hw_config(imx636);
 	if (ret) {
