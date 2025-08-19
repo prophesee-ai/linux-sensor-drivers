@@ -385,6 +385,7 @@ struct imx636 {
 	struct v4l2_ctrl *link_freq_ctrl;
 	struct v4l2_fwnode_endpoint bus_cfg;
 	struct v4l2_rect crop;
+	u32 rstn_wait_ms;
 };
 
 /**
@@ -1321,6 +1322,13 @@ static int imx636_parse_hw_config(struct imx636 *imx636)
 	if (ret)
 		return ret;
 
+	/* Get hardware dependent timing parameters*/
+	imx636->rstn_wait_ms = 55; // CCAM5 introduces 48ms +/-15% delay
+	// CCAM5 handling RSTn needs 285 = 55 + 230  (~200 ms delay for reset -> RSTn)
+	if (fwnode_property_read_u32(fwnode, "rstn-delay-ms", &imx636->rstn_wait_ms)) {
+        dev_warn(imx636->dev, "Failed to read rstn-delay-ms. Set it if you use the CCAM5 adapter RSTn");
+	}
+
 	ep = fwnode_graph_get_next_endpoint(fwnode, NULL);
 	if (!ep)
 		return -ENXIO;
@@ -1473,7 +1481,7 @@ static int enable_power_and_clock(struct imx636 *imx636)
 
 	/* Tstart = 15ms (min) */
 	/* but CCAM5 introduces 48ms +/-15% delay */
-	msleep_interruptible(15 + 55);
+	msleep_interruptible(15 + imx636->rstn_wait_ms);
 	return 0;
 
 error_preparing_clk:

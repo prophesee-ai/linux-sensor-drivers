@@ -790,6 +790,13 @@ static int genx320_parse_hw_config(struct genx320 *genx320)
 	if (ret)
 		return ret;
 
+	/* Get hardware dependent timing parameters*/
+	genx320->rstn_wait_ms = 55; // CCAM5 introduces 48ms +/-15% delay
+	// CCAM5 handling RSTn needs 285 = 55 + 230  (~200 ms delay for reset -> RSTn)
+	if (fwnode_property_read_u32(fwnode, "rstn-delay-ms", &genx320->rstn_wait_ms)) {
+        dev_warn(genx320->pcw.dev, "Failed to read rstn-delay-ms. Set it if you use the CCAM5 adapter RSTn");
+	}
+
 	ep = fwnode_graph_get_next_endpoint(fwnode, NULL);
 	if (!ep)
 		return -ENXIO;
@@ -952,7 +959,7 @@ static int genx320_power_on(struct device *dev)
 
 	/* Tstart = 15ms (min) */
 	/* but CCAM5 introduces 48ms +/-15% delay */
-	msleep_interruptible(15 + 55);
+	msleep_interruptible(15 + genx320->rstn_wait_ms);
 	ret = genx320_check_boot(genx320);
 	if (ret) {
 		dev_err(genx320->pcw.dev, "fail to boot sensor");

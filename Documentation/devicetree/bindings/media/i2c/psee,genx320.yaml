@@ -45,6 +45,9 @@ properties:
     description: Reference to the GPIO connected to the RSTn pin, if any.
     maxItems: 1
 
+  rstn-delay-ms:
+    description: Delay in milliseconds after RSTn is asserted before the sensor is ready. 
+
   port:
     description: MIPI CSI-2 transmitter port
     $ref: /schemas/graph.yaml#/$defs/port-base
