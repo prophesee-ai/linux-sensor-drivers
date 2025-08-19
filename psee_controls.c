@@ -112,6 +112,37 @@ static const struct v4l2_ctrl_ops stream_src_ctrl_ops = {
 	.s_ctrl = stream_src_s_ctrl,
 };
 
+static int sync_mode_s_ctrl(struct v4l2_ctrl *ctrl)
+{
+	struct psee_v4l2_ctrl_wrapper *pcw = ctrl_to_pcw(ctrl);
+	struct core_config *core = &pcw->controls.core;
+
+	if (pcw->streaming) {
+		dev_err(pcw->sd.dev, "Cannot change sync mode while streaming\n");
+		return -EBUSY;
+	}
+
+	switch (ctrl->val) {
+	case SYNC_MODE_STANDALONE:
+		core->sync_mode = SYNC_MODE_STANDALONE;
+		break;
+	case SYNC_MODE_MASTER:
+		core->sync_mode = SYNC_MODE_MASTER;
+		break;
+	case SYNC_MODE_SLAVE:
+		core->sync_mode = SYNC_MODE_SLAVE;
+		break;
+	default:
+		dev_err(pcw->sd.dev, "Invalid sync mode\n");
+		return -EINVAL;
+	}
+	return 0;
+}
+
+static const struct v4l2_ctrl_ops sync_mode_ctrl_ops = {
+	.s_ctrl = sync_mode_s_ctrl,
+};
+
 static bool roi_ctrl_equal(const struct v4l2_ctrl *ctrl,
 			   union v4l2_ctrl_ptr ptr1,
 			   union v4l2_ctrl_ptr ptr2)
@@ -233,6 +264,24 @@ static const struct v4l2_ctrl_type_ops roi_pixel_type_ops = {
 	.init = roi_pixel_ctrl_init,
 	.log = roi_pixel_ctrl_log,
 	.validate = roi_pixel_ctrl_validate,
+};
+
+static const char * const sync_mode_name[] = {
+	"Standalone",
+	"Master",
+	"Slave",
+};
+
+static const struct v4l2_ctrl_config sync_mode_cfg = {
+    .id            = PSEE_CID_SYNC_MODE,
+    .name          = "sync_mode",
+    .type          = V4L2_CTRL_TYPE_MENU,
+    .min           = 0,
+    .max           = ARRAY_SIZE(sync_mode_name) - 1,
+    .def           = 0,
+    .menu_skip_mask = 0,
+    .qmenu          = sync_mode_name,
+	.ops 			= &sync_mode_ctrl_ops,
 };
 
 struct v4l2_ctrl_config roi_roni = {
@@ -410,6 +459,8 @@ int psee_init_controls(struct psee_v4l2_ctrl_wrapper *pcw, const struct psee_ctr
 		ARRAY_SIZE(event_source_name) - 1,
 		0, PIXEL_ARRAY, event_source_name);
 
+	pcw->sync_ctrl = v4l2_ctrl_new_custom(hdl, &sync_mode_cfg, NULL);
+	
 	if (pcw->ops->esp->roi_window) {
 		v4l2_ctrl_new_custom(hdl, &roi_reset, NULL);
 		v4l2_ctrl_new_custom(hdl, &roi_roni, NULL);

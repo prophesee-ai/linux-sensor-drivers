@@ -575,6 +575,7 @@ static int genx320_init(struct genx320 *genx320)
 
 	// default config
 	core->source = SENSOR_SOURCE_PIXEL_ARRAY;
+	core->sync_mode = SYNC_MODE_STANDALONE;
 	core->sensor_if = SENSOR_IF_MIPI;
 	core->format = EVENT_FORMAT_EVT3;
 

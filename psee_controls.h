@@ -42,6 +42,7 @@
 
 #define PSEE_SOURCE_CLASS 0x2000
 #define PSEE_CID_STREAMING_SOURCE (V4L2_CID_USER_BASE | PSEE_SOURCE_CLASS)
+#define PSEE_CID_SYNC_MODE ((V4L2_CID_USER_BASE | PSEE_SOURCE_CLASS) + 2)
 
 #define PSEE_CID_SENSOR_ID ((V4L2_CID_USER_BASE | PSEE_SOURCE_CLASS) + 1)
 
@@ -124,6 +125,7 @@ struct psee_v4l2_ctrl_wrapper {
   };
 
   struct v4l2_ctrl *stream_ctrl;
+  struct v4l2_ctrl *sync_ctrl;
   struct v4l2_ctrl_handler hdl;
   bool initialized;
   bool streaming;

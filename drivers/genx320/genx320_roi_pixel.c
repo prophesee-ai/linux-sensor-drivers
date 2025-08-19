@@ -96,7 +96,7 @@ int genx320_roi_pixel_reset(struct psee_controls *controls)
 	return 0;
 }
 
-int genx320_roi_pixel_apply(struct psee_controls *controls)
+static int genx320_roi_pixel_apply(struct psee_controls *controls)
 {
 	// if enabled or smth like that...
 	return __apply(controls);
