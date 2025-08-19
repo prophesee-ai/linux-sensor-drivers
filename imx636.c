@@ -226,6 +226,7 @@ union ro_lowpower_ctrl {
 #define IMX636_MIPI_ESCAPE_CTRL (MIPI_CSI_BASE + 0x004)
 #define IMX636_MIPI_ESCAPE_CLK_EN BIT(7)
 
+#define IMX636_MIPI_DATA_IDENTIFIER (MIPI_CSI_BASE + 0x01C)
 #define IMX636_MIPI_PACKET_SIZE (MIPI_CSI_BASE + 0x020)
 
 #define IMX636_MIPI_PL_RG_1 (MIPI_CSI_BASE + 0x064)
@@ -612,6 +613,12 @@ static int imx636_enum_mbus_code(struct v4l2_subdev *sd,
 				 struct v4l2_subdev_state *sd_state,
 				 struct v4l2_subdev_mbus_code_enum *code)
 {
+	#ifdef OMIT_PSEE_FORMATS 
+	 if (code->index > 0)
+        return -EINVAL;
+
+	code->code = MEDIA_BUS_FMT_Y8_1X8;
+#else
 	switch (code->index) {
 	case 0:
 		code->code = MEDIA_BUS_FMT_PSEE_EVT3;
@@ -626,6 +633,7 @@ static int imx636_enum_mbus_code(struct v4l2_subdev *sd,
 	default:
 		return -EINVAL;
 	}
+#endif
 	return 0;
 }
 
@@ -728,9 +736,12 @@ static int imx636_get_pad_format(struct v4l2_subdev *sd,
 		framefmt = v4l2_subdev_state_get_format(sd_state, fmt->pad);
 		fmt->format = *framefmt;
 	} else {
-		imx636_fill_pad_format(imx636, imx636->format_code, fmt);
+#ifdef OMIT_PSEE_FORMATS 
+	imx636_fill_pad_format(imx636, MEDIA_BUS_FMT_Y8_1X8, fmt);
+#else
+	imx636_fill_pad_format(imx636, imx636->format_code, fmt);
+#endif
 	}
-
 	mutex_unlock(&imx636->mutex);
 
 	return 0;
@@ -754,6 +765,9 @@ static int imx636_set_pad_format(struct v4l2_subdev *sd,
 
 	mutex_lock(&imx636->mutex);
 
+#ifdef OMIT_PSEE_FORMATS 
+	code = MEDIA_BUS_FMT_Y8_1X8;
+#else
 	switch (fmt->format.code) {
 	case MEDIA_BUS_FMT_PSEE_EVT21:
 	case MEDIA_BUS_FMT_PSEE_EVT21ME:
@@ -768,7 +782,7 @@ static int imx636_set_pad_format(struct v4l2_subdev *sd,
 		code = MEDIA_BUS_FMT_PSEE_EVT3;
 		break;
 	}
-
+#endif
 	imx636_fill_pad_format(imx636, code, fmt);
 
 	if (fmt->which == V4L2_SUBDEV_FORMAT_TRY) {
@@ -780,11 +794,13 @@ static int imx636_set_pad_format(struct v4l2_subdev *sd,
 		/* The output format can't be changed while streaming */
 		ret = -EBUSY;
 	} else {
+#ifndef OMIT_PSEE_FORMATS 
 		/* Directly apply the format if the sensor is already initialized */
 		if (imx636->initialized)
 			ret = imx636_apply_format(imx636, code);
 		else
 			imx636->format_code = code;
+#endif
 	}
 	mutex_unlock(&imx636->mutex);
 
@@ -1052,6 +1068,10 @@ static int imx636_reconfigure_csi2(struct imx636 *imx636)
 		RET_ON(imx636_clear_reg(imx636, IMX636_MIPI_CONTROL,
 			IMX636_MIPI_PACKET_TIMEOUT_ENABLE));
 	}
+
+#ifdef OMIT_PSEE_FORMATS
+	RET_ON(imx636_write_reg(imx636, IMX636_MIPI_DATA_IDENTIFIER, 0x2a));
+#endif
 
 	/* Re-enable stream and control */
 	RET_ON(imx636_write_reg(imx636, IMX636_MIPI_STREAM, 1));
@@ -1944,6 +1964,68 @@ static int create_link_freq_control(struct imx636 *imx636)
 	return imx636->sd.ctrl_handler->error;
 }
 
+#ifdef OMIT_PSEE_FORMATS
+#define V4L2_CID_EVT_FORMAT (V4L2_CID_USER_BASE + 0x2000 + 0x3)
+static int evt_format_s_ctrl(struct v4l2_ctrl *ctrl)
+{
+	struct imx636 *imx636 = ctrl->priv;
+	int ret = 0;
+
+	if (!imx636->initialized)
+		return ret;
+
+	if(imx636->streaming) {
+		dev_err(imx636->dev, "Cannot change evt format while streaming");
+		return -EBUSY;
+	}
+
+	switch (ctrl->val) {
+	case 0:	
+#ifdef __BIG_ENDIAN
+		/* On BE, the Evt2.1 event is in the right order*/
+		imx636->format_code = MEDIA_BUS_FMT_PSEE_EVT21;
+#else
+		imx636->format_code = MEDIA_BUS_FMT_PSEE_EVT21ME;
+#endif
+		break;
+	case 1:
+		imx636->format_code = MEDIA_BUS_FMT_PSEE_EVT3;
+		break;
+	default:
+		dev_err(imx636->dev, "Invalid evt format\n");
+		return -EINVAL;
+	}
+
+	if (imx636->initialized)
+		ret = imx636_apply_format(imx636, imx636->format_code);
+
+	return ret;
+}
+
+static const struct v4l2_ctrl_ops evt_format_ctrl_ops = {
+	.s_ctrl = evt_format_s_ctrl,
+};
+static const char * const evt_format_names[] = {
+#ifdef __BIG_ENDIAN
+	"EVT21",
+#else
+	"EVT21ME",
+#endif
+	"EVT3",
+};
+static const struct v4l2_ctrl_config evt_format_cfg = {
+    .id            = V4L2_CID_EVT_FORMAT,
+    .name          = "evt_format",
+    .type          = V4L2_CTRL_TYPE_MENU,
+    .min           = 0,
+    .max           = ARRAY_SIZE(evt_format_names) - 1,
+    .def           = 1, // Default to EVT3
+    .menu_skip_mask = 0,
+    .qmenu          = evt_format_names,
+	.ops 			= &evt_format_ctrl_ops,
+};
+#endif
+
 /**
  * imx636_probe() - I2C client device binding
  * @client: pointer to i2c client device
@@ -2015,6 +2097,11 @@ static int imx636_probe(struct i2c_client *client)
 	imx636->ctrls.lock = &imx636->mutex;
 	create_bias_controls(imx636);
 	create_end_of_frame_marker_controls(imx636);
+
+#ifdef OMIT_PSEE_FORMATS
+	struct v4l2_ctrl *ctrl_format;
+	ctrl_format = v4l2_ctrl_new_custom(imx636->sd.ctrl_handler, &evt_format_cfg, imx636);
+#endif
 
 	imx636->pattern_ctrl = v4l2_ctrl_new_std_menu_items(
 		imx636->sd.ctrl_handler,

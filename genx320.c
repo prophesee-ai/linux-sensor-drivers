@@ -202,11 +202,17 @@ static int genx320_enum_mbus_code(struct v4l2_subdev *sd,
 				  struct v4l2_subdev_state *sd_state,
 				  struct v4l2_subdev_mbus_code_enum *code)
 {
+#ifdef OMIT_PSEE_FORMATS 
+	 if (code->index > 0)
+        return -EINVAL;
+
+	code->code = MEDIA_BUS_FMT_Y8_1X8;
+#else
 	if (code->index >= ARRAY_SIZE(supported_formats))
 		return -EINVAL;
 
 	code->code = supported_formats[code->index];
-
+#endif
 	return 0;
 }
 
@@ -276,7 +282,11 @@ static int genx320_get_pad_format(struct v4l2_subdev *sd,
 		framefmt = v4l2_subdev_state_get_format(sd_state, fmt->pad);
 		fmt->format = *framefmt;
 	} else {
+#ifdef OMIT_PSEE_FORMATS 
+		genx320_fill_pad_format(genx320, MEDIA_BUS_FMT_Y8_1X8, fmt);
+#else	
 		genx320_fill_pad_format(genx320, genx320->format_code, fmt);
+#endif
 	}
 
 	mutex_unlock(&genx320->mutex);
@@ -302,6 +312,9 @@ static int genx320_set_pad_format(struct v4l2_subdev *sd,
 
 	mutex_lock(&genx320->mutex);
 
+#ifdef OMIT_PSEE_FORMATS 
+	code = MEDIA_BUS_FMT_Y8_1X8;
+#else
 	switch (fmt->format.code) {
 	case MEDIA_BUS_FMT_PSEE_EVT3:
 		code = MEDIA_BUS_FMT_PSEE_EVT3;
@@ -315,6 +328,7 @@ static int genx320_set_pad_format(struct v4l2_subdev *sd,
 		code = MEDIA_BUS_FMT_PSEE_EVT21;
 		break;
 	}
+#endif
 	genx320_fill_pad_format(genx320, code, fmt);
 
 	if (fmt->which == V4L2_SUBDEV_FORMAT_TRY) {
@@ -323,9 +337,11 @@ static int genx320_set_pad_format(struct v4l2_subdev *sd,
 		framefmt = v4l2_subdev_state_get_format(sd_state, fmt->pad);
 		*framefmt = fmt->format;
 	} else {
+#ifndef OMIT_PSEE_FORMATS
 		genx320->format_code = code;
+#endif
 	}
-
+	
 	mutex_unlock(&genx320->mutex);
 
 	return ret;
@@ -1021,6 +1037,63 @@ static const struct psee_ctrl_ops genx320_ctrl_ops = {
 	.write_reg = &genx320_ctrl_write,
 };
 
+#ifdef OMIT_PSEE_FORMATS
+static int evt_format_s_ctrl(struct v4l2_ctrl *ctrl)
+{
+	struct psee_v4l2_ctrl_wrapper *pcw = ctrl_to_pcw(ctrl);
+	struct core_config *core = &pcw->controls.core;
+	struct genx320 *genx320 = to_genx320(&pcw->sd);
+
+	if (pcw->streaming) {
+		dev_err(pcw->sd.dev, "Cannot change format while streaming\n");
+		return -EBUSY;
+	}
+	switch (ctrl->val) {
+	case 0:
+		core->format = EVENT_FORMAT_EVT2;
+		genx320->format_code = MEDIA_BUS_FMT_PSEE_EVT2;
+		break;
+	case 1:
+		core->format = EVENT_FORMAT_EVT21;
+		genx320->format_code = MEDIA_BUS_FMT_PSEE_EVT21;
+		break;
+	case 2:
+		core->format = EVENT_FORMAT_EVT3;
+		genx320->format_code = MEDIA_BUS_FMT_PSEE_EVT3;
+		break;
+	default:
+		dev_err(pcw->sd.dev, "Invalid format code\n");
+		return -EINVAL;
+	}
+
+	RET_ON(genx320_apply_format(genx320));
+
+	return 0;
+}
+
+static const struct v4l2_ctrl_ops evt_format_ctrl_ops = {
+	.s_ctrl = evt_format_s_ctrl,
+};
+
+static const char * const evt_format_names[] = {
+	"EVT2",
+	"EVT21",
+	"EVT3",
+};
+
+static const struct v4l2_ctrl_config evt_format_cfg = {
+    .id            = PSEE_CID_EVT_FORMAT,
+    .name          = "evt_format",
+    .type          = V4L2_CTRL_TYPE_MENU,
+    .min           = 0,
+    .max           = ARRAY_SIZE(evt_format_names) - 1,
+    .def           = 1, // Default to EVT21 which is set internally in probe
+    .menu_skip_mask = 0,
+    .qmenu          = evt_format_names,
+	.ops 			= &evt_format_ctrl_ops,
+};
+#endif
+
 /**
  * genx320_probe() - I2C client device binding
  * @client: pointer to i2c client device
@@ -1064,6 +1137,11 @@ static int genx320_probe(struct i2c_client *client)
 		NULL, V4L2_CID_LINK_FREQ, 0, 0, &link_freq[0]);
 	if (ctrl)
 		ctrl->flags |= V4L2_CTRL_FLAG_READ_ONLY;
+
+#ifdef OMIT_PSEE_FORMATS
+	struct v4l2_ctrl *ctrl_format;
+	ctrl_format = v4l2_ctrl_new_custom(&genx320->pcw.hdl, &evt_format_cfg, NULL);
+#endif
 
 	ret = genx320_power_on(genx320->pcw.dev);
 	if (ret) {

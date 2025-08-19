@@ -42,6 +42,9 @@ static int genx320_mipi_set_packet_config(struct psee_controls *controls, enum m
 
 	RET_ON(read_register(ctrl, mipi_csi_ctrl, &mipi_csi_ctrl.raw));
 	mipi_csi_ctrl.pkt_size = 0x1000;
+#ifdef OMIT_PSEE_FORMATS
+	mipi_csi_ctrl.data_type = 0x2a; // enforce raw8 format
+#endif
 	RET_ON(write_register(ctrl, mipi_csi_ctrl, mipi_csi_ctrl.raw));
 
 	RET_ON(read_register(ctrl, edf_output_interface_control,
