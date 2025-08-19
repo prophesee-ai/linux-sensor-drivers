@@ -4,7 +4,7 @@
 #include "genx320_registers.h"
 #include "genx320_mipi.h"
 
-int genx320_mipi_configure_csi2_freq(struct psee_controls *controls, u32 bit_rate)
+static int genx320_mipi_configure_csi2_freq(struct psee_controls *controls, u32 bit_rate)
 {
 	// TODO; 800 is the reset configuration
 	if (bit_rate != 800)
@@ -13,7 +13,7 @@ int genx320_mipi_configure_csi2_freq(struct psee_controls *controls, u32 bit_rat
 	return 0;
 }
 
-int genx320_mipi_set_packet_config(struct psee_controls *controls, enum mipi_frame_format fmt)
+static int genx320_mipi_set_packet_config(struct psee_controls *controls, enum mipi_frame_format fmt)
 {
 	struct psee_ctrl_ops ctrl = controls->dev_ctrl;
 	struct mipi_config *mipi = &controls->mipi;

@@ -1,24 +1,24 @@
 // SPDX-License-Identifier: GPL-2.0-only
-#include "../api.h"
+#include "genx320.h"
 #include "../common.h"
 #include "genx320_registers.h"
 #include "genx320_mipi.h"
 
-bool __is_big_endian(void)
+static bool __is_big_endian(void)
 {
 #if !defined(__BYTE_ORDER__) || !defined(__ORDER_BIG_ENDIAN__)
 	#error "Unknown byte order, both __BYTE_ORDER__ and __ORDER_BIG_ENDIAN__ must be defined."
 #endif
 
 #if __BYTE_ORDER__ == __ORDER_BIG_ENDIAN__
-	return 0;
-#else
 	return 1;
+#else
+	return 0;
 #endif
 }
 
 
-int __genx320_check_boot(struct psee_controls *controls)
+static int __genx320_check_boot(struct psee_controls *controls)
 {
 	u32 magic, chip_id;
 
@@ -65,8 +65,41 @@ int genx320_set_event_format(struct psee_controls *controls, enum event_format f
 	return 0;
 }
 
+static int genx320_timebase_config(struct psee_controls *controls, enum sync_mode mode)
+{
+	struct psee_ctrl_ops ctrl = controls->dev_ctrl;
+	struct core_config *core = &controls->core;
 
-int genx320_start_pixel_array(struct psee_controls *controls)
+	RET_ON(__genx320_check_boot(controls));
+
+	core->sync_mode = mode;
+
+	u32 external = (mode != SYNC_MODE_STANDALONE);
+	u32 master = (mode == SYNC_MODE_MASTER);
+
+	RET_ON(write_field(ctrl, ro_time_base_ctrl, time_base_mode, external));
+	RET_ON(write_field(ctrl, ro_time_base_ctrl, external_mode, master)); 
+	RET_ON(write_field(ctrl, ro_time_base_ctrl, external_mode_enable, external));
+
+	if(external)
+	{
+		if(master)
+		{
+			// set SYNCHRO IO to output mode
+			RET_ON(write_field(ctrl, io_ctrl2, sync_enzi, 0));
+			RET_ON(write_field(ctrl, io_ctrl2, sync_en, 0));
+		}
+		else
+		{
+			// set SYNCHRO IO to input mode
+			RET_ON(write_field(ctrl, io_ctrl2, sync_enzi, 1));
+			RET_ON(write_field(ctrl, io_ctrl2, sync_en, 1));
+		}
+	} 
+	return 0;
+}
+
+static int genx320_start_pixel_array(struct psee_controls *controls)
 {
 	struct psee_ctrl_ops ctrl = controls->dev_ctrl;
 
@@ -93,7 +126,7 @@ int genx320_start_pixel_array(struct psee_controls *controls)
 	return 0;
 }
 
-int genx320_start_ro_pattern(struct psee_controls *controls)
+static int genx320_start_ro_pattern(struct psee_controls *controls)
 {
 	struct psee_ctrl_ops ctrl = controls->dev_ctrl;
 	ro_readout_ctrl ro_readout_ctrl;
@@ -106,7 +139,7 @@ int genx320_start_ro_pattern(struct psee_controls *controls)
 	return 0;
 }
 
-int genx320_start_ts_pattern(struct psee_controls *controls)
+static int genx320_start_ts_pattern(struct psee_controls *controls)
 {
 	struct psee_ctrl_ops ctrl = controls->dev_ctrl;
 	ro_td_ctrl ro_td_ctrl;
@@ -115,7 +148,7 @@ int genx320_start_ts_pattern(struct psee_controls *controls)
 	return 0;
 }
 
-int genx320_cpi_start_pattern(struct psee_controls *controls)
+static int genx320_cpi_start_pattern(struct psee_controls *controls)
 {
 	RET_ON(__genx320_check_boot(controls));
 	return 0;
@@ -191,7 +224,7 @@ int genx320_stop_streaming(struct psee_controls *controls)
 	return 0;
 }
 
-int genx320_wait_boot(struct psee_controls *controls)
+static int genx320_wait_boot(struct psee_controls *controls)
 {
 	u32 retries = 0;
 	u32 ret;
@@ -210,7 +243,7 @@ int genx320_wait_boot(struct psee_controls *controls)
 	return -ETIMEDOUT;
 }
 
-int genx320_soft_reset(struct psee_controls *controls)
+static int genx320_soft_reset(struct psee_controls *controls)
 {
 	struct psee_ctrl_ops ctrl = controls->dev_ctrl;
 	// dig_soft_reset
