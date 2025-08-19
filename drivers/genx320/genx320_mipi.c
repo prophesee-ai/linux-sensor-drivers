@@ -72,7 +72,7 @@ int genx320_mipi_set_packet_config(struct psee_controls *controls, enum mipi_fra
 	mipi_csi_ctrl.enable = 1;
 	RET_ON(write_register(ctrl, mipi_csi_ctrl, mipi_csi_ctrl.raw));
 
-	RET_ON(write_register(ctrl, mipi_csi_bl_frame, 0x80003E80));
+	RET_ON(write_register(ctrl, mipi_csi_bl_frame, 0x80000680));
 
 	return 0;
 }
