@@ -359,7 +359,6 @@ static const struct link_timing {
  * @format_code: Media-ctl code of the output format
  * @streaming: Flag indicating streaming state
  * @initialized: Flag to know if controls may be applied
- * @quirk_fixed_packet_size: Disable packet timeout
  * @ctrls: structure holding the V4L2 controls
  * @pattern_ctrl: the control setting the pattern to stream
  * @link_freq_ctrl: the control setting the CSI-2 lanes frequency
@@ -378,7 +377,6 @@ struct imx636 {
 	u32 format_code;
 	bool streaming;
 	bool initialized;
-	bool quirk_fixed_packet_size;
 	struct v4l2_ctrl_handler ctrls;
 	struct v4l2_ctrl *pattern_ctrl;
 	struct v4l2_ctrl *eof_marker_ctrl;
@@ -1063,12 +1061,6 @@ static int imx636_reconfigure_csi2(struct imx636 *imx636)
 		IMX636_MIPI_RG_BIASEN | IMX636_MIPI_RG_LPREGEN));
 	usleep_range(200, 300);
 
-	if (imx636->quirk_fixed_packet_size) {
-		/* Only close packet when MIPI_PACKET_SIZE is reached */
-		RET_ON(imx636_clear_reg(imx636, IMX636_MIPI_CONTROL,
-			IMX636_MIPI_PACKET_TIMEOUT_ENABLE));
-	}
-
 #ifdef OMIT_PSEE_FORMATS
 	RET_ON(imx636_write_reg(imx636, IMX636_MIPI_DATA_IDENTIFIER, 0x2a));
 #endif
@@ -1351,12 +1343,6 @@ static int imx636_parse_hw_config(struct imx636 *imx636)
 	ep = fwnode_graph_get_next_endpoint(fwnode, NULL);
 	if (!ep)
 		return -ENXIO;
-
-	/* Check if quirks are requested */
-	if (of_property_read_bool(np, "imx636,fixed-packet-size")) {
-		dev_info(imx636->dev, "setting fixed-size packets");
-		imx636->quirk_fixed_packet_size = true;
-	}
 
 	imx636->bus_cfg.bus_type = V4L2_MBUS_CSI2_DPHY;
 	ret = v4l2_fwnode_endpoint_alloc_parse(ep, &imx636->bus_cfg);

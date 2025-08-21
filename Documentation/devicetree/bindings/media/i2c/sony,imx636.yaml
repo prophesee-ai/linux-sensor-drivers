@@ -52,10 +52,6 @@ properties:
   rstn-delay-ms:
     description: Delay in milliseconds after RSTn is asserted before the sensor is ready. 
 
-  imx636,fixed-packet-size:
-    type: boolean
-    description: quirk for disabling timeout on packet transmission
-
   port:
     description: MIPI CSI-2 transmitter port
     $ref: /schemas/graph.yaml#/$defs/port-base

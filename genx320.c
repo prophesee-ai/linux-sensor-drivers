@@ -787,7 +787,7 @@ static int genx320_parse_hw_config(struct genx320 *genx320)
 	/* Get sensor input clock */
 	genx320->inclk = devm_clk_get(genx320->pcw.dev, NULL);
 	if (IS_ERR(genx320->inclk)) {
-		dev_err(genx320->pcw.dev, "could not get inclk");
+		dev_dbg(genx320->pcw.dev, "could not get inclk");
 		return PTR_ERR(genx320->inclk);
 	}
 
