@@ -1655,48 +1655,60 @@ static union bgen bias_cid2cfg(u32 v4l2_ctrl_id)
 		return (union bgen){ {
 			.buf_stg = 1,
 			.mux_en = 1,
+			.mux_sel = 0,
 			.buf_en = 1,
 			.idac_en = 1,
+			.vdac_en = 0,
 			.scr_set = 1,
 		} };
 	case V4L2_CID_BIAS_HPF:
 		return (union bgen){ {
 			.buf_stg = 1,
 			.mux_en = 1,
+			.mux_sel = 0,
 			.buf_en = 1,
 			.idac_en = 1,
+			.vdac_en = 0,
 			.scr_set = 1,
 		} };
 	case V4L2_CID_BIAS_DIFF:
 		return (union bgen){ {
 			.buf_stg = 1,
 			.mux_en = 1,
+			.mux_sel = 0,
 			.buf_en = 1,
 			.idac_en = 1,
+			.vdac_en = 0,
 			.scr_set = 0,
 		} };
 	case V4L2_CID_BIAS_DIFF_ON:
 		return (union bgen){ {
 			.buf_stg = 1,
 			.mux_en = 1,
+			.mux_sel = 0,
 			.buf_en = 1,
 			.idac_en = 1,
+			.vdac_en = 0,
 			.scr_set = 0,
 		} };
 	case V4L2_CID_BIAS_DIFF_OFF:
 		return (union bgen){ {
 			.buf_stg = 1,
 			.mux_en = 1,
+			.mux_sel = 0,
 			.buf_en = 1,
 			.idac_en = 1,
+			.vdac_en = 0,
 			.scr_set = 0,
 		} };
 	case V4L2_CID_BIAS_REFR:
 		return (union bgen){ {
 			.buf_stg = 2,
 			.mux_en = 1,
+			.mux_sel = 0,
 			.buf_en = 0,
 			.idac_en = 1,
+			.vdac_en = 0,
 			.scr_set = 1,
 		} };
 	default:
