@@ -318,6 +318,15 @@ static const struct link_timing {
 	},
 };
 
+struct biases {
+	union bgen bias_fo;
+	union bgen bias_diff_on;
+	union bgen bias_diff;
+	union bgen bias_diff_off;
+	union bgen bias_refr;
+	union bgen bias_hpf;
+};
+
 /**
  * struct imx636 - imx636 sensor device structure
  * @dev: Pointer to generic device
@@ -332,6 +341,7 @@ static const struct link_timing {
  * @format_code: Media-ctl code of the output format
  * @streaming: Flag indicating streaming state
  * @initialized: Flag to know if controls may be applied
+ * @rom_biases: Bias values initialized by sensor ROM code
  * @ctrls: structure holding the V4L2 controls
  * @pattern_ctrl: the control setting the pattern to stream
  * @crop: the rectangle requested as region of interest
@@ -349,6 +359,7 @@ struct imx636 {
 	u32 format_code;
 	bool streaming;
 	bool initialized;
+	struct biases rom_biases;
 	struct v4l2_ctrl_handler ctrls;
 	struct v4l2_ctrl *pattern_ctrl;
 	struct v4l2_rect crop;
@@ -951,6 +962,18 @@ static int imx636_tune_analog(struct imx636 *imx636)
 	return 0;
 }
 
+static int imx636_fetch_bias_values(struct imx636 *imx636)
+{
+	RET_ON(imx636_read_reg(imx636, IMX636_BIAS_FO, 1, &imx636->rom_biases.bias_fo.raw));
+	RET_ON(imx636_read_reg(imx636, IMX636_BIAS_DIFF_ON, 1, &imx636->rom_biases.bias_diff_on.raw));
+	RET_ON(imx636_read_reg(imx636, IMX636_BIAS_DIFF, 1, &imx636->rom_biases.bias_diff.raw));
+	RET_ON(imx636_read_reg(imx636, IMX636_BIAS_DIFF_OFF, 1, &imx636->rom_biases.bias_diff_off.raw));
+	RET_ON(imx636_read_reg(imx636, IMX636_BIAS_REFR, 1, &imx636->rom_biases.bias_refr.raw));
+	RET_ON(imx636_read_reg(imx636, IMX636_BIAS_HPF, 1, &imx636->rom_biases.bias_hpf.raw));
+
+	return 0;
+}
+
 /**
  * imx636_init() - Set sensor ready to stream
  * @imx636: pointer to imx636 device
@@ -962,6 +985,7 @@ static int imx636_init(struct imx636 *imx636)
 	RET_ON(imx636_reconfigure_csi2_freq(imx636));
 	RET_ON(imx636_tune_analog(imx636));
 	RET_ON(imx636_apply_format(imx636, imx636->format_code));
+	RET_ON(imx636_fetch_bias_values(imx636));
 	imx636->initialized = true;
 	return 0;
 }
