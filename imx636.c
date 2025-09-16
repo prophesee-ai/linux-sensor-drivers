@@ -117,6 +117,9 @@ union bgen {
 /* BIAS bgen0_08 */
 #define IMX636_BIAS_REFR (BIAS_BASE + 0x020)
 
+#define IMX636_BIAS_IDAC_MASK 0xFF
+#define IMX636_BIAS_IDAC(val) ((val) & IMX636_BIAS_IDAC_MASK)
+
 /* ROI registers */
 #define PSEE_ROI_BASE 0x2000
 #define IMX636_ROI_X00 (PSEE_ROI_BASE + 0x0000)
@@ -943,6 +946,8 @@ static int imx636_tune_analog(struct imx636 *imx636)
 	/* Disable analog pipeline */
 	/* Analog queueing seems to generate artifacts in some conditions */
 	RET_ON(imx636_write_reg(imx636, IMX636_RO_CTRL, ro_ctrl.raw));
+	/* Update bias diff idac value to reduce power consumption */
+	RET_ON(imx636_set_bitfield(imx636, IMX636_BIAS_DIFF, IMX636_BIAS_IDAC_MASK, IMX636_BIAS_IDAC(0x4D)));
 	return 0;
 }
 
@@ -1631,11 +1636,11 @@ static int new_bctrl(struct imx636 *imx636, u8 def, u8 min, u8 max, u32 id)
 static int create_bias_controls(struct imx636 *imx636)
 {
 	/* Ordered as in the IMX636 App Note */
-	/* For trimmed value, set default outside [min,max] range */
+	/* For trimmed value or to force hardware sync, set default outside [min,max] range */
 	/* Register values for:   def,  min,  max */
 	RET_ON(new_bctrl(imx636, 0x00, 0x2D, 0x6E, V4L2_CID_BIAS_FO));
 	RET_ON(new_bctrl(imx636, 0x00, 0x0F, 0xFF, V4L2_CID_BIAS_DIFF_ON));
-	RET_ON(new_bctrl(imx636, 0x54, 0x34, 0x64, V4L2_CID_BIAS_DIFF));
+	RET_ON(new_bctrl(imx636, 0x00, 0x34, 0x64, V4L2_CID_BIAS_DIFF));
 	RET_ON(new_bctrl(imx636, 0x00, 0x0F, 0xFF, V4L2_CID_BIAS_DIFF_OFF));
 	RET_ON(new_bctrl(imx636, 0x14, 0x00, 0xFF, V4L2_CID_BIAS_REFR));
 	RET_ON(new_bctrl(imx636, 0x00, 0x00, 0x96, V4L2_CID_BIAS_HPF));
