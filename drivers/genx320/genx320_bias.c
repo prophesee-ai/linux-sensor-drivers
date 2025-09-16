@@ -19,21 +19,21 @@ static struct bias_settings settings[] = {
 		.addr = bias0_fo_address,
 		.min = 19,
 		.max = 39,
-		.def = 29,
+		.def = 34,
 	},
 	{
 		.name = "bias_hpf",
 		.addr = bias0_hpf_address,
 		.min = 0,
 		.max = 127,
-		.def = 0,
+		.def = 40,
 	},
 	{
 		.name = "bias_diff_on",
 		.addr = bias0_diff_on_address,
 		.min = 24,
 		.max = 60,
-		.def = 40,
+		.def = 25,
 	},
 	{
 		.name = "bias_diff",
@@ -47,14 +47,14 @@ static struct bias_settings settings[] = {
 		.addr = bias0_diff_off_address,
 		.min = 19,
 		.max = 50,
-		.def = 40,
+		.def = 28,
 	},
 	{
 		.name = "bias_refr",
 		.addr = bias0_refr_address,
 		.min = 0,
 		.max = 127,
-		.def = 82
+		.def = 10
 	},
 };
 
