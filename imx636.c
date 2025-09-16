@@ -1553,7 +1553,7 @@ static union bgen bias_cid2cfg(u32 v4l2_ctrl_id)
 			.buf_stg = 2,
 			.mux_en = 1,
 			.mux_sel = 0,
-			.buf_en = 0,
+			.buf_en = 1,
 			.idac_en = 1,
 			.vdac_en = 0,
 			.scr_set = 1,
