@@ -1551,7 +1551,7 @@ static union bgen bias_cid2cfg(u32 v4l2_ctrl_id)
 	case V4L2_CID_BIAS_REFR:
 		return (union bgen){ {
 			.buf_stg = 2,
-			.mux_en = 1,
+			.mux_en = 0,
 			.mux_sel = 0,
 			.buf_en = 1,
 			.idac_en = 1,
