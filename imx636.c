@@ -2075,9 +2075,20 @@ static int imx636_probe(struct i2c_client *client)
 		dev_err(imx636->dev, "failed to find sensor: %d", ret);
 		goto error_detect_imx636;
 	}
+	
+	/* Check Sensor's ROM code execution */
+	ret = imx636_check_boot(imx636);
+	if (ret)
+		goto error_boot_imx636;
 
 	/* Set default output format */
 	imx636->format_code = MEDIA_BUS_FMT_PSEE_EVT3;
+
+	/* Applying sensor's initialization post ROM */
+	ret = imx636_init(imx636);
+	if (ret)
+		goto error_init_imx636;
+
 
 	/* Initialize subdev */
 	imx636->sd.flags |= V4L2_SUBDEV_FL_HAS_DEVNODE;
@@ -2142,6 +2153,9 @@ static int imx636_probe(struct i2c_client *client)
 
 error_register_subdev:
 	media_entity_cleanup(&imx636->sd.entity);
+error_boot_imx636:
+error_init_imx636:
+	imx636_deinit(imx636);
 error_create_controls:
 error_init_entity:
 error_detect_imx636:
