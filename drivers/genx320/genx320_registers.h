@@ -196,6 +196,12 @@ PSEE_REGISTER_DEF(evt_icn_clk_ctrl, 0x0210, {
 	u32 ro_clk_en :1;
 });
 
+PSEE_REGISTER_DEF(io_ctrl2, 0x608, {
+	u32 sync_en	:1;
+ 	u32:3;
+ 	u32 sync_enzi :1;
+});
+
 // authorized ranges never exceed 7 bits. Let's keep the ctl field this size
 // for now
 #define BIAS_REGISTER_DEF(bank, name, address) \
@@ -232,12 +238,6 @@ BIAS_REGISTER_DEF(1, refr, 0x1138);
 BIAS_REGISTER_DEF(1, invp, 0x113C);
 BIAS_REGISTER_DEF(1, req_pu, 0x1140);
 BIAS_REGISTER_DEF(1, sm_pdy, 0x1144);
-
-PSEE_REGISTER_DEF(edf_control, 0x7044, {
-	u32 format :2;
-	u32:2;
-	u32 endianness :1;
-});
 
 PSEE_REGISTER_DEF(bgen, 0x1000, {
 	u32 bias_ctrl :7;
@@ -323,6 +323,12 @@ PSEE_REGISTER_DEF(edf_pipeline_control, 0x7000, {
 	u32 enable :1;
 	u32 drop_nbackpressure :1;
 	u32 bypass :1;
+});
+
+PSEE_REGISTER_DEF(edf_control, 0x7044, {
+	u32 format :2;
+	u32:2;
+	u32 endianness :1;
 });
 
 PSEE_REGISTER_DEF(edf_output_interface_control, 0x704C, {

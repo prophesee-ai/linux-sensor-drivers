@@ -65,7 +65,6 @@ int genx320_set_event_format(struct psee_controls *controls, enum event_format f
 	return 0;
 }
 
-
 int genx320_start_pixel_array(struct psee_controls *controls)
 {
 	struct psee_ctrl_ops ctrl = controls->dev_ctrl;
@@ -127,6 +126,7 @@ int genx320_start_streaming(struct psee_controls *controls)
 	struct core_config *config = &controls->core;
 
 	RET_ON(__genx320_check_boot(controls));
+
 	switch (config->sensor_if) {
 	case SENSOR_IF_MIPI:
 		RET_ON(write_field(ctrl, mipi_csi_ctrl, enable, 1));

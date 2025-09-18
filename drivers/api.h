@@ -55,6 +55,12 @@ enum event_format {
 	EVENT_FORMAT_INVALID,
 };
 
+enum sync_mode {
+	SYNC_MODE_STANDALONE = 0,
+	SYNC_MODE_MASTER = 1,
+	SYNC_MODE_SLAVE = 2,
+};
+
 struct core_config {
 	enum sensor_source source;
 	enum sensor_if sensor_if;
