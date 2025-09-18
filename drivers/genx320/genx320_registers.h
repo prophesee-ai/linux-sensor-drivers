@@ -239,12 +239,6 @@ BIAS_REGISTER_DEF(1, invp, 0x113C);
 BIAS_REGISTER_DEF(1, req_pu, 0x1140);
 BIAS_REGISTER_DEF(1, sm_pdy, 0x1144);
 
-PSEE_REGISTER_DEF(edf_control, 0x7044, {
-	u32 format :2;
-	u32:2;
-	u32 endianness :1;
-});
-
 PSEE_REGISTER_DEF(bgen, 0x1000, {
 	u32 bias_ctrl :7;
 	u32:9;
@@ -329,6 +323,12 @@ PSEE_REGISTER_DEF(edf_pipeline_control, 0x7000, {
 	u32 enable :1;
 	u32 drop_nbackpressure :1;
 	u32 bypass :1;
+});
+
+PSEE_REGISTER_DEF(edf_control, 0x7044, {
+	u32 format :2;
+	u32:2;
+	u32 endianness :1;
 });
 
 PSEE_REGISTER_DEF(edf_event_injection, 0x7048, {

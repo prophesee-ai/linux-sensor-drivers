@@ -65,7 +65,6 @@ struct core_config {
 	enum sensor_source source;
 	enum sensor_if sensor_if;
 	enum event_format format;
-	enum sync_mode sync_mode;
 };
 
 typedef int (*psee_write_reg)(void *hdl, u32 reg, const u32 val);

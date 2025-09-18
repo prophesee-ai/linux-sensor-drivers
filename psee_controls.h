@@ -42,10 +42,9 @@
 
 #define PSEE_SOURCE_CLASS 0x2000
 #define PSEE_CID_STREAMING_SOURCE (V4L2_CID_USER_BASE | PSEE_SOURCE_CLASS)
+#define PSEE_CID_SENSOR_ID ((V4L2_CID_USER_BASE | PSEE_SOURCE_CLASS) + 1)
 #define PSEE_CID_SYNC_MODE ((V4L2_CID_USER_BASE | PSEE_SOURCE_CLASS) + 2)
 #define PSEE_CID_EVT_FORMAT ((V4L2_CID_USER_BASE | PSEE_SOURCE_CLASS) + 3)
-
-#define PSEE_CID_SENSOR_ID ((V4L2_CID_USER_BASE | PSEE_SOURCE_CLASS) + 1)
 
 struct psee_roi_master_ops {
   int (*init)(struct psee_controls *controls);
@@ -98,6 +97,10 @@ struct psee_cpi_ops {
   int (*configure)(struct psee_controls *controls);
 };
 
+struct psee_io_ops {
+  int (*configure_sync_mode)(struct psee_controls *controls, enum sync_mode mode);
+};
+
 struct psee_core_ops {
   int (*s_format)(struct psee_controls *controls, enum event_format fmt);
   int (*start)(struct psee_controls *controls);
@@ -111,6 +114,7 @@ struct psee_ops {
   const struct psee_mipi_ops *mipi;
   const struct psee_cpi_ops *cpi;
   const struct psee_core_ops *core;
+  const struct psee_io_ops *io;
 };
 
 struct psee_v4l2_ctrl_wrapper {
@@ -160,6 +164,12 @@ psee_ctrl_to_pcw(struct psee_controls *ctrls) {
 #define call_mipi_op(pcw, op, ...)                                             \
   (has_mipi_op(pcw, op)                                                        \
        ? (pcw)->ops->mipi->op(&((pcw)->controls), ##__VA_ARGS__)               \
+       : -EINVAL)
+#define has_io(pcw) ((pcw)->ops && (pcw)->ops->io)
+#define has_io_op(pcw, op) (has_io(pcw) && (pcw)->ops->io->op)
+#define call_io_op(pcw, op, ...)                                             \
+  (has_io_op(pcw, op)                                                        \
+       ? (pcw)->ops->io->op(&((pcw)->controls), ##__VA_ARGS__)               \
        : -EINVAL)
 
 #define has_core(pcw) ((pcw)->ops && (pcw)->ops->core)

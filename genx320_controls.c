@@ -8,6 +8,7 @@
 #include "drivers/genx320/genx320_erc.h"
 #include "drivers/genx320/genx320_bias.h"
 #include "drivers/genx320/genx320_mipi.h"
+#include "drivers/genx320/genx320_io.h"
 #include "drivers/genx320/genx320.h"
 
 static struct psee_roi_master_ops genx320_roi_window_ops = {
@@ -55,6 +56,10 @@ static struct psee_mipi_ops genx320_mipi_ops = {
 	.configure = genx320_mipi_configure,
 };
 
+static struct psee_io_ops genx320_io_ops = {
+	.configure_sync_mode = genx320_io_sync_mode,
+};
+
 static struct psee_core_ops genx320_core_ops = {
 	.start = genx320_start_streaming,
 	.stop = genx320_stop_streaming,
@@ -66,6 +71,7 @@ static struct psee_core_ops genx320_core_ops = {
 static struct psee_ops genx320_ops = {
 	.esp = &genx320_esp_ops,
 	.mipi = &genx320_mipi_ops,
+	.io = &genx320_io_ops,
 	.core = &genx320_core_ops,
 };
 

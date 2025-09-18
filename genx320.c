@@ -591,7 +591,6 @@ static int genx320_init(struct genx320 *genx320)
 
 	// default config
 	core->source = SENSOR_SOURCE_PIXEL_ARRAY;
-	core->sync_mode = SYNC_MODE_STANDALONE;
 	core->sensor_if = SENSOR_IF_MIPI;
 	core->format = EVENT_FORMAT_EVT3;
 
@@ -634,6 +633,9 @@ static int genx320_init(struct genx320 *genx320)
  */
 static int genx320_start_streaming(struct genx320 *genx320)
 {
+	struct psee_v4l2_ctrl_wrapper *pcw = &genx320->pcw;
+	struct core_config *config = &pcw->controls.core;
+
 	int ret = 0;
 
 	ret = __v4l2_ctrl_handler_setup(&genx320->pcw.hdl);

@@ -115,32 +115,32 @@ static const struct v4l2_ctrl_ops stream_src_ctrl_ops = {
 static int sync_mode_s_ctrl(struct v4l2_ctrl *ctrl)
 {
 	struct psee_v4l2_ctrl_wrapper *pcw = ctrl_to_pcw(ctrl);
-	struct core_config *core = &pcw->controls.core;
 
-	if (pcw->streaming) {
-		dev_err(pcw->sd.dev, "Cannot change sync mode while streaming\n");
-		return -EBUSY;
-	}
+	if (!has_io_op(pcw, configure_sync_mode))
+		return -EINVAL;
 
-	switch (ctrl->val) {
-	case SYNC_MODE_STANDALONE:
-		core->sync_mode = SYNC_MODE_STANDALONE;
-		break;
-	case SYNC_MODE_MASTER:
-		core->sync_mode = SYNC_MODE_MASTER;
-		break;
-	case SYNC_MODE_SLAVE:
-		core->sync_mode = SYNC_MODE_SLAVE;
-		break;
-	default:
+	if (ctrl->val < 0 || ctrl->val > 2) {
 		dev_err(pcw->sd.dev, "Invalid sync mode\n");
 		return -EINVAL;
 	}
-	return 0;
+	return call_io_op(pcw, configure_sync_mode, ctrl->val);
 }
 
-static const struct v4l2_ctrl_ops sync_mode_ctrl_ops = {
-	.s_ctrl = sync_mode_s_ctrl,
+static int s_io_ctrl(struct v4l2_ctrl *ctrl)
+{
+	struct psee_v4l2_ctrl_wrapper *pcw = ctrl_to_pcw(ctrl);
+
+	if (!pcw->initialized)
+		return 0;
+
+	if (ctrl->id == PSEE_CID_SYNC_MODE)
+		return sync_mode_s_ctrl(ctrl);
+
+	return -EINVAL;
+}
+
+static const struct v4l2_ctrl_ops io_ctrl_ops = {
+	.s_ctrl = s_io_ctrl,
 };
 
 static bool roi_ctrl_equal(const struct v4l2_ctrl *ctrl,
@@ -281,7 +281,7 @@ static const struct v4l2_ctrl_config sync_mode_cfg = {
     .def           = 0,
     .menu_skip_mask = 0,
     .qmenu          = sync_mode_name,
-	.ops 			= &sync_mode_ctrl_ops,
+	.ops 			= &io_ctrl_ops,
 };
 
 struct v4l2_ctrl_config roi_roni = {
@@ -444,7 +444,7 @@ int psee_init_controls(struct psee_v4l2_ctrl_wrapper *pcw, const struct psee_ctr
 	struct v4l2_ctrl_handler *hdl = &pcw->hdl;
 	int id, num_bias;
 
-	v4l2_ctrl_handler_init(hdl, 16);
+	v4l2_ctrl_handler_init(hdl, 17);
 	controls->dev_ctrl = *ctrl_ops;
 	controls->dev_ctrl.hdl = pcw;
 	pcw->ops = ops;
@@ -459,8 +459,10 @@ int psee_init_controls(struct psee_v4l2_ctrl_wrapper *pcw, const struct psee_ctr
 		ARRAY_SIZE(event_source_name) - 1,
 		0, PIXEL_ARRAY, event_source_name);
 
-	pcw->sync_ctrl = v4l2_ctrl_new_custom(hdl, &sync_mode_cfg, NULL);
-	
+	if (pcw->ops->io) {
+		pcw->sync_ctrl = v4l2_ctrl_new_custom(hdl, &sync_mode_cfg, NULL);
+	}
+
 	if (pcw->ops->esp->roi_window) {
 		v4l2_ctrl_new_custom(hdl, &roi_reset, NULL);
 		v4l2_ctrl_new_custom(hdl, &roi_roni, NULL);

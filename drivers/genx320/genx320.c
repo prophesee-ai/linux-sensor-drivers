@@ -65,39 +65,6 @@ int genx320_set_event_format(struct psee_controls *controls, enum event_format f
 	return 0;
 }
 
-static int genx320_timebase_config(struct psee_controls *controls)
-{
-	struct psee_ctrl_ops ctrl = controls->dev_ctrl;
-	struct core_config *core = &controls->core;
-	enum sync_mode mode = core->sync_mode;
-
-	RET_ON(__genx320_check_boot(controls));
-
-	u32 external = (mode != SYNC_MODE_STANDALONE);
-	u32 master = (mode == SYNC_MODE_MASTER);
-
-	RET_ON(write_field(ctrl, ro_time_base_ctrl, time_base_mode, external));
-	RET_ON(write_field(ctrl, ro_time_base_ctrl, external_mode, master)); 
-	RET_ON(write_field(ctrl, ro_time_base_ctrl, external_mode_enable, external));
-
-	if(external)
-	{
-		if(master)
-		{
-			// set SYNCHRO IO to output mode
-			RET_ON(write_field(ctrl, io_ctrl2, sync_enzi, 0));
-			RET_ON(write_field(ctrl, io_ctrl2, sync_en, 0));
-		}
-		else
-		{
-			// set SYNCHRO IO to input mode
-			RET_ON(write_field(ctrl, io_ctrl2, sync_enzi, 1));
-			RET_ON(write_field(ctrl, io_ctrl2, sync_en, 1));
-		}
-	} 
-	return 0;
-}
-
 static int genx320_start_pixel_array(struct psee_controls *controls)
 {
 	struct psee_ctrl_ops ctrl = controls->dev_ctrl;
@@ -159,7 +126,6 @@ int genx320_start_streaming(struct psee_controls *controls)
 	struct core_config *config = &controls->core;
 
 	RET_ON(__genx320_check_boot(controls));
-	RET_ON(genx320_timebase_config(controls));
 
 	switch (config->sensor_if) {
 	case SENSOR_IF_MIPI:
