@@ -541,10 +541,7 @@ static int genx320_init(struct genx320 *genx320)
  */
 static int genx320_start_streaming(struct genx320 *genx320)
 {
-	struct psee_v4l2_ctrl_wrapper *pcw = &genx320->pcw;
-	struct core_config *config = &pcw->controls.core;
 	int ret = 0;
-
 
 	ret = __v4l2_ctrl_handler_setup(&genx320->pcw.hdl);
 	if (ret < 0) {
@@ -787,6 +784,25 @@ static int genx320_log_status(struct v4l2_subdev *sd)
 
 	RET_ON(genx320_read(genx320, mipi_csi_stat_frame_period_address, &val));
 	dev_info(dev, "Frame Period: %u", val);
+	
+	dev_info(dev, "******* BIAS STATUS ********");
+	RET_ON(genx320_read(genx320, bias0_fo_address, &val));
+	dev_info(dev, "bias_fo: 0x%x", val);
+	
+	RET_ON(genx320_read(genx320, bias0_hpf_address, &val));
+	dev_info(dev, "bias_hpf: 0x%x", val);
+	
+	RET_ON(genx320_read(genx320, bias0_diff_on_address, &val));
+	dev_info(dev, "bias_diff_on: 0x%x", val);
+	
+	RET_ON(genx320_read(genx320, bias0_diff_address, &val));
+	dev_info(dev, "bias_diff: 0x%x", val);
+	
+	RET_ON(genx320_read(genx320, bias0_diff_off_address, &val));
+	dev_info(dev, "bias_diff_off: 0x%x", val);
+	
+	RET_ON(genx320_read(genx320, bias0_refr_address, &val));
+	dev_info(dev, "bias_refr: 0x%x", val);
 	return 0;
 }
 #ifdef CONFIG_VIDEO_ADV_DEBUG
