@@ -1745,16 +1745,40 @@ static union bgen bias_cid2cfg(u32 v4l2_ctrl_id)
 	}
 }
 
+static union bgen imx636_get_rom_biases(struct imx636 *imx636, u32 v4l2_ctrl_id)
+{
+	switch (v4l2_ctrl_id) {
+	case V4L2_CID_BIAS_FO:
+		return imx636->rom_biases.bias_fo;
+	case V4L2_CID_BIAS_HPF:
+		return imx636->rom_biases.bias_hpf;
+	case V4L2_CID_BIAS_DIFF:
+		return imx636->rom_biases.bias_diff;
+	case V4L2_CID_BIAS_DIFF_ON:
+		return imx636->rom_biases.bias_diff_on;
+	case V4L2_CID_BIAS_DIFF_OFF:
+		return imx636->rom_biases.bias_diff_off;
+	case V4L2_CID_BIAS_REFR:
+		return imx636->rom_biases.bias_refr;
+	default:
+		return (union bgen){ .raw = 0 };
+	}
+}
+
 static int bias_s_ctrl(struct v4l2_ctrl *ctrl)
 {
 	struct imx636 *imx636 = ctrl->priv;
 	union bgen bias;
+	union bgen rom_bias;
 
 	if (!imx636->initialized)
 		return 0;
 
+	rom_bias = imx636_get_rom_biases(imx636, ctrl->id);
 	bias = bias_cid2cfg(ctrl->id);
+
 	bias.idac_ctl = ctrl->val;
+	bias.vdac_ctl = rom_bias.vdac_ctl;
 	bias.single = 1;
 	return imx636_write_reg(imx636, bias_cid2addr(ctrl->id), bias.raw);
 }
