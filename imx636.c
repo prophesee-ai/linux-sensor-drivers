@@ -1259,6 +1259,37 @@ done_endpoint_free:
 	return ret;
 }
 
+static int imx636_log_status(struct v4l2_subdev *sd)
+{
+	struct imx636 *imx636 = to_imx636(sd);
+	u32 val;
+	
+	dev_info(imx636->dev, "******* BIAS STATUS ********");
+	
+	if (imx636->initialized) {
+		RET_ON(imx636_read_reg(imx636, IMX636_BIAS_FO, 1, &val));
+		dev_info(imx636->dev, "bias_fo: 0x%x", val);
+
+		RET_ON(imx636_read_reg(imx636, IMX636_BIAS_HPF, 1, &val));
+		dev_info(imx636->dev, "bias_hpf: 0x%x", val);
+
+		RET_ON(imx636_read_reg(imx636, IMX636_BIAS_DIFF_ON, 1, &val));
+		dev_info(imx636->dev, "bias_diff_on: 0x%x", val);
+
+		RET_ON(imx636_read_reg(imx636, IMX636_BIAS_DIFF, 1, &val));
+		dev_info(imx636->dev, "bias_diff: 0x%x", val);
+
+		RET_ON(imx636_read_reg(imx636, IMX636_BIAS_DIFF_OFF, 1, &val));
+		dev_info(imx636->dev, "bias_diff_off: 0x%x", val);
+
+		RET_ON(imx636_read_reg(imx636, IMX636_BIAS_REFR, 1, &val));
+		dev_info(imx636->dev, "bias_refr: 0x%x", val);
+	} else {
+		dev_info(imx636->dev, "Cannot report bias status. Sensor is powered down");
+	}
+
+	return 0;
+}
 #ifdef CONFIG_VIDEO_ADV_DEBUG
 static int imx636_g_register(struct v4l2_subdev *sd, struct v4l2_dbg_register *reg)
 {
@@ -1291,6 +1322,7 @@ static const struct v4l2_subdev_video_ops imx636_video_ops = {
 };
 
 static const struct v4l2_subdev_core_ops imx636_core_ops = {
+	.log_status = imx636_log_status,
 #ifdef CONFIG_VIDEO_ADV_DEBUG
 	.g_register = imx636_g_register,
 	.s_register = imx636_s_register,
