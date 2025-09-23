@@ -219,6 +219,16 @@ union ro_lowpower_ctrl {
 };
 #define IMX636_LP_OUTPUT_DISABLE BIT(1)
 
+#define IMX636_DIG_PAD2_CTRL (0x044)
+union dig_pad2_ctrl {
+	struct {
+		u32 reserved_15_0       :16;
+		u32 pad_sync            :4;
+		u32 reserved_31_20      :12;
+	};
+	u32 raw;
+};
+
 /* MIPI_CSI registers */
 #define MIPI_CSI_BASE 0xB000
 
@@ -395,6 +405,7 @@ struct imx636 {
 	struct v4l2_ctrl *pattern_ctrl;
 	struct v4l2_ctrl *eof_marker_ctrl;
 	struct v4l2_ctrl *link_freq_ctrl;
+	struct v4l2_ctrl *sync_ctrl;
 	struct v4l2_fwnode_endpoint bus_cfg;
 	struct v4l2_rect crop;
 	u32 rstn_wait_ms;
@@ -1114,6 +1125,7 @@ static int imx636_tune_analog(struct imx636 *imx636)
 	RET_ON(imx636_write_reg(imx636, IMX636_RO_CTRL, ro_ctrl.raw));
 	/* Update bias diff idac value to reduce power consumption */
 	RET_ON(imx636_set_bitfield(imx636, IMX636_BIAS_DIFF, IMX636_BIAS_IDAC_MASK, IMX636_BIAS_IDAC(0x4D)));
+
 	return 0;
 }
 
@@ -1166,10 +1178,14 @@ static void imx636_deinit(struct imx636 *imx636)
 static int imx636_start_streaming(struct imx636 *imx636, enum event_src src)
 {
 	union ro_ctrl ro_ctrl = { .ro_digital_pipe_en = 1, };
-	union timebase_ctrl timebase = {
-		.enable = 1,
-		.us_counter_max = 100,
-	};
+
+
+	union timebase_ctrl timebase = {0};
+	// sync mode may have modified this.
+	RET_ON(imx636_read_reg(imx636, IMX636_RO_TIME_BASE_CTRL, 1, &timebase.raw));
+	timebase.enable = 1;
+	timebase.us_counter_max = 100;
+
 	union ro_lowpower_ctrl lp_ctrl = {
 		.output_disable = 0,
 	};
@@ -2116,6 +2132,77 @@ static const struct v4l2_ctrl_config evt_format_cfg = {
 };
 #endif
 
+#define PSEE_CID_SYNC_MODE (V4L2_CID_USER_BASE + 0x2000 + 0x2)
+
+enum sync_mode {
+	SYNC_MODE_STANDALONE = 0,
+	SYNC_MODE_MASTER = 1,
+	SYNC_MODE_SLAVE = 2,
+};
+
+static int s_io_ctrl(struct v4l2_ctrl *ctrl)
+{
+	struct imx636 *imx636 = ctrl->priv;
+	int ret = 0;
+
+	if (!imx636->initialized)
+		return ret;
+
+	if (ctrl->id == PSEE_CID_SYNC_MODE) {
+		enum sync_mode mode = ctrl->val;
+		u32 external = (mode != SYNC_MODE_STANDALONE);
+		u32 master = (mode == SYNC_MODE_MASTER);
+
+		// timebase config:
+		union timebase_ctrl timebase = {0};
+		RET_ON(imx636_read_reg(imx636, IMX636_RO_TIME_BASE_CTRL, 1, &timebase.raw));
+		timebase.mode = external;
+		timebase.external_mode = master;
+		timebase.external_mode_enable = external;
+		RET_ON(imx636_write_reg(imx636, IMX636_RO_TIME_BASE_CTRL, timebase.raw));
+
+		// pad config:
+		if (external) {
+			union dig_pad2_ctrl dig_pad2_ctrl = {0};
+			RET_ON(imx636_read_reg(imx636, IMX636_DIG_PAD2_CTRL, 1, &dig_pad2_ctrl.raw));
+			if (master) {
+				// set SYNCHRO IO to output mode
+				dig_pad2_ctrl.pad_sync = 0b1100; // output mode
+			} else {
+				// set SYNCHRO IO to input mode
+				dig_pad2_ctrl.pad_sync = 0b1111; // input mode
+			}
+			RET_ON(imx636_write_reg(imx636, IMX636_DIG_PAD2_CTRL, dig_pad2_ctrl.raw));
+		}
+	} else {
+		dev_err(imx636->dev, "unknown io ctrl id %d", ctrl->id);
+		return -EINVAL;
+	}
+
+	return 0;
+}
+static const struct v4l2_ctrl_ops io_ctrl_ops = {
+	.s_ctrl = s_io_ctrl,
+};
+
+static const char * const sync_mode_name[] = {
+	"Standalone",
+	"Master",
+	"Slave",
+};
+
+static const struct v4l2_ctrl_config sync_mode_cfg = {
+	.id				= PSEE_CID_SYNC_MODE,
+	.name			= "sync_mode",
+	.type			= V4L2_CTRL_TYPE_MENU,
+	.min			= 0,
+	.max			= ARRAY_SIZE(sync_mode_name) - 1,
+	.def			= 0,
+	.menu_skip_mask	= 0,
+	.qmenu			= sync_mode_name,
+	.ops			= &io_ctrl_ops,
+};
+
 /**
  * imx636_probe() - I2C client device binding
  * @client: pointer to i2c client device
@@ -2176,7 +2263,6 @@ static int imx636_probe(struct i2c_client *client)
 	if (ret)
 		goto error_init_imx636;
 
-
 	/* Initialize subdev */
 	imx636->sd.flags |= V4L2_SUBDEV_FL_HAS_DEVNODE;
 	imx636->sd.flags |= V4L2_SUBDEV_FL_HAS_EVENTS;
@@ -2210,6 +2296,8 @@ static int imx636_probe(struct i2c_client *client)
 		V4L2_CID_TEST_PATTERN,
 		ARRAY_SIZE(event_source_name) - 1,
 		0, PIXEL_ARRAY, event_source_name);
+
+	imx636->sync_ctrl = v4l2_ctrl_new_custom(imx636->sd.ctrl_handler, &sync_mode_cfg, imx636);
 
 	create_link_freq_control(imx636);
 
