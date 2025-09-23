@@ -588,7 +588,8 @@ static u32 eoi_pipeline_control_cfg(struct imx636 *imx636)
 	}
 #endif
 
-	if (imx636->eof_marker_ctrl->val == NO_EOF) {
+	if (!imx636->eof_marker_ctrl ||
+		imx636->eof_marker_ctrl->val == NO_EOF) {
 		pipeline_control.cfg_mrc_metadata_msb_en = 0;
 		pipeline_control.cfg_mrc_metadata_lsb_en = 0;
 		pipeline_control.cfg_mrc_metadata_tl_en = 0;
@@ -981,6 +982,12 @@ static const struct link_timing *get_dphy_timings(struct imx636 *imx636)
  */
 static int imx636_reconfigure_csi2(struct imx636 *imx636)
 {
+
+	if(!imx636->link_freq_ctrl) {
+		dev_dbg(imx636->dev, "pre-ctrl-setup init: not yet setting up csi2");
+		return 0;
+	}
+
 	/* The sensor starts with lanes at 1.5Gbps, which provides top performances, but some
 	 * hardware may require to lower this frequency to preserve data integrity.
 	 */
