@@ -63,13 +63,13 @@ int apply(struct psee_controls *controls)
 
 int genx320_roi_window_enable(struct psee_controls *controls, bool en)
 {
-	if (en)
-		// just reapply the current config
-		return apply(controls);
-
 	struct psee_ctrl_ops ctrl = controls->dev_ctrl;
 	roi_win_array saved_x;
 	roi_win_array saved_y;
+
+	if (en)
+		// just reapply the current config
+		return apply(controls);
 
 	RET_ON(ctrl.read_reg(ctrl.hdl, roi_win_array_address, &saved_x.raw));
 	RET_ON(ctrl.read_reg(ctrl.hdl, roi_win_array_address + 4, &saved_y.raw));
