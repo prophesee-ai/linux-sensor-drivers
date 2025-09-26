@@ -55,9 +55,9 @@ static int __apply(struct psee_controls *controls)
 
 static void __clear(struct psee_controls *controls)
 {
-	struct psee_ctrl_ops ctrl = controls->dev_ctrl;
 	struct roi_pixel_config *config = &controls->roi_pixel;
 	u32 y;
+
 	// reset all to enabled, dirty
 	for (y = 0; y < config->grid.height; y++)  {
 		memset(&config->grid.rows[y].vectors, 0xFF, (config->grid.width / 32));
@@ -89,8 +89,6 @@ int genx320_roi_pixel_init(struct psee_controls *controls)
 
 int genx320_roi_pixel_reset(struct psee_controls *controls)
 {
-	u32 y;
-
 	__clear(controls);
 	RET_ON(__apply(controls));
 	return 0;
@@ -104,7 +102,6 @@ static int genx320_roi_pixel_apply(struct psee_controls *controls)
 
 int genx320_roi_pixel_set_pixel(struct psee_controls *controls, u32 x, u32 y, bool enabled)
 {
-	struct psee_ctrl_ops ctrl = controls->dev_ctrl;
 	struct roi_pixel_config *config = &controls->roi_pixel;
 	u32 vector_idx, bit_idx, reg_val, mask, saved_fields, write_field, new_reg_val;
 
@@ -131,7 +128,6 @@ int genx320_roi_pixel_get_pixel(struct psee_controls *controls, u32 x, u32 y, bo
 int genx320_roi_pixel_set_array(struct psee_controls *controls, struct grid *grid)
 {
 	u32 y, x;
-	struct psee_ctrl_ops ctrl = controls->dev_ctrl;
 	struct roi_pixel_config *config = &controls->roi_pixel;
 	bool updated = false;
 
@@ -156,7 +152,6 @@ int genx320_roi_pixel_set_array(struct psee_controls *controls, struct grid *gri
 int genx320_roi_pixel_get_array(struct psee_controls *controls, struct grid *grid)
 {
 	u32 y, x;
-	struct psee_ctrl_ops ctrl = controls->dev_ctrl;
 	struct roi_pixel_config *config = &controls->roi_pixel;
 
 	if (!grid || grid->width != config->grid.width || grid->height != config->grid.height)

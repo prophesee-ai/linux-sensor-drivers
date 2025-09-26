@@ -633,9 +633,6 @@ static int genx320_init(struct genx320 *genx320)
  */
 static int genx320_start_streaming(struct genx320 *genx320)
 {
-	struct psee_v4l2_ctrl_wrapper *pcw = &genx320->pcw;
-	struct core_config *config = &pcw->controls.core;
-
 	int ret = 0;
 
 	ret = __v4l2_ctrl_handler_setup(&genx320->pcw.hdl);

@@ -273,15 +273,15 @@ static const char * const sync_mode_name[] = {
 };
 
 static const struct v4l2_ctrl_config sync_mode_cfg = {
-    .id            = PSEE_CID_SYNC_MODE,
-    .name          = "sync_mode",
-    .type          = V4L2_CTRL_TYPE_MENU,
-    .min           = 0,
-    .max           = ARRAY_SIZE(sync_mode_name) - 1,
-    .def           = 0,
-    .menu_skip_mask = 0,
-    .qmenu          = sync_mode_name,
-	.ops 			= &io_ctrl_ops,
+	.id				= PSEE_CID_SYNC_MODE,
+	.name			= "sync_mode",
+	.type			= V4L2_CTRL_TYPE_MENU,
+	.min			= 0,
+	.max			= ARRAY_SIZE(sync_mode_name) - 1,
+	.def			= 0,
+	.menu_skip_mask	= 0,
+	.qmenu			= sync_mode_name,
+	.ops			= &io_ctrl_ops,
 };
 
 struct v4l2_ctrl_config roi_roni = {

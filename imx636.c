@@ -1178,14 +1178,7 @@ static void imx636_deinit(struct imx636 *imx636)
 static int imx636_start_streaming(struct imx636 *imx636, enum event_src src)
 {
 	union ro_ctrl ro_ctrl = { .ro_digital_pipe_en = 1, };
-
-
 	union timebase_ctrl timebase = {0};
-	// sync mode may have modified this.
-	RET_ON(imx636_read_reg(imx636, IMX636_RO_TIME_BASE_CTRL, 1, &timebase.raw));
-	timebase.enable = 1;
-	timebase.us_counter_max = 100;
-
 	union ro_lowpower_ctrl lp_ctrl = {
 		.output_disable = 0,
 	};
@@ -1195,6 +1188,11 @@ static int imx636_start_streaming(struct imx636 *imx636, enum event_src src)
 		.pix_roi_slope_n = 3, /* default value */
 		.pix_roi_slope_p = 3, /* default value */
 	};
+
+	// sync mode may have modified timebase control register.
+	RET_ON(imx636_read_reg(imx636, IMX636_RO_TIME_BASE_CTRL, 1, &timebase.raw));
+	timebase.enable = 1;
+	timebase.us_counter_max = 100;
 
 	/* MIPI CSI-2 enable */
 	RET_ON(imx636_set_reg(imx636, IMX636_MIPI_CONTROL, IMX636_MIPI_CSI_ENABLE));

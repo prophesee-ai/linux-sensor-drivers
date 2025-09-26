@@ -7,7 +7,6 @@
 
 int genx320_io_sync_mode(struct psee_controls *controls, enum sync_mode mode) {
 	struct psee_ctrl_ops ctrl = controls->dev_ctrl;
-	struct core_config *core = &controls->core;
 
 	u32 external = (mode != SYNC_MODE_STANDALONE);
 	u32 master = (mode == SYNC_MODE_MASTER);
@@ -16,9 +15,9 @@ int genx320_io_sync_mode(struct psee_controls *controls, enum sync_mode mode) {
 	RET_ON(write_field(ctrl, ro_time_base_ctrl, external_mode, master)); 
 	RET_ON(write_field(ctrl, ro_time_base_ctrl, external_mode_enable, external));
 
-	if(external)
+	if (external)
 	{
-		if(master)
+		if (master)
 		{
 			// set SYNCHRO IO to output mode
 			RET_ON(write_field(ctrl, io_ctrl2, sync_enzi, 0));

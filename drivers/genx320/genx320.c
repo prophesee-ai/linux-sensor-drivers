@@ -96,7 +96,6 @@ static int genx320_start_ro_pattern(struct psee_controls *controls)
 {
 	struct psee_ctrl_ops ctrl = controls->dev_ctrl;
 	ro_readout_ctrl ro_readout_ctrl;
-	ro_td_ctrl ro_td_ctrl;
 
 	RET_ON(read_register(ctrl, ro_readout_ctrl, &ro_readout_ctrl.raw));
 	ro_readout_ctrl.ro_self_test_en = 1;
@@ -108,7 +107,6 @@ static int genx320_start_ro_pattern(struct psee_controls *controls)
 static int genx320_start_ts_pattern(struct psee_controls *controls)
 {
 	struct psee_ctrl_ops ctrl = controls->dev_ctrl;
-	ro_td_ctrl ro_td_ctrl;
 
 	RET_ON(write_register(ctrl, ro_readout_ctrl, (u32)0));
 	return 0;
