@@ -11,9 +11,9 @@ bool __is_big_endian(void)
 #endif
 
 #if __BYTE_ORDER__ == __ORDER_BIG_ENDIAN__
-	return 0;
-#else
 	return 1;
+#else
+	return 0;
 #endif
 }
 
