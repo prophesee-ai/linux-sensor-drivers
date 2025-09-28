@@ -60,7 +60,7 @@ int genx320_set_event_format(struct psee_controls *controls, enum event_format f
 	RET_ON(write_field(ctrl, edf_control, format, fmt_val));
 	RET_ON(write_field(ctrl, edf_control, endianness, __is_big_endian()));
 
-	RET_ON(write_field(ctrl, edf_pipeline_control, bypass, fmt == EVENT_FORMAT_EVT21));
+	RET_ON(write_field(ctrl, edf_pipeline_control, bypass, 0));
 	RET_ON(write_field(ctrl, edf_pipeline_control, enable, 1));
 	return 0;
 }
