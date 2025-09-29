@@ -1279,33 +1279,34 @@ static int imx636_log_status(struct v4l2_subdev *sd)
 {
 	struct imx636 *imx636 = to_imx636(sd);
 	u32 val;
-	
+
 	dev_info(imx636->dev, "******* BIAS STATUS ********");
-	
-	if (imx636->initialized) {
-		RET_ON(imx636_read_reg(imx636, IMX636_BIAS_FO, 1, &val));
-		dev_info(imx636->dev, "bias_fo: 0x%x", val);
 
-		RET_ON(imx636_read_reg(imx636, IMX636_BIAS_HPF, 1, &val));
-		dev_info(imx636->dev, "bias_hpf: 0x%x", val);
-
-		RET_ON(imx636_read_reg(imx636, IMX636_BIAS_DIFF_ON, 1, &val));
-		dev_info(imx636->dev, "bias_diff_on: 0x%x", val);
-
-		RET_ON(imx636_read_reg(imx636, IMX636_BIAS_DIFF, 1, &val));
-		dev_info(imx636->dev, "bias_diff: 0x%x", val);
-
-		RET_ON(imx636_read_reg(imx636, IMX636_BIAS_DIFF_OFF, 1, &val));
-		dev_info(imx636->dev, "bias_diff_off: 0x%x", val);
-
-		RET_ON(imx636_read_reg(imx636, IMX636_BIAS_REFR, 1, &val));
-		dev_info(imx636->dev, "bias_refr: 0x%x", val);
-	} else {
+	if (!imx636->initialized) {
 		dev_info(imx636->dev, "Cannot report bias status. Sensor is powered down");
+		return 0;
 	}
 
+	RET_ON(imx636_read_reg(imx636, IMX636_BIAS_FO, 1, &val));
+	dev_info(imx636->dev, "bias_fo: 0x%x", val);
+
+	RET_ON(imx636_read_reg(imx636, IMX636_BIAS_HPF, 1, &val));
+	dev_info(imx636->dev, "bias_hpf: 0x%x", val);
+
+	RET_ON(imx636_read_reg(imx636, IMX636_BIAS_DIFF_ON, 1, &val));
+	dev_info(imx636->dev, "bias_diff_on: 0x%x", val);
+
+	RET_ON(imx636_read_reg(imx636, IMX636_BIAS_DIFF, 1, &val));
+	dev_info(imx636->dev, "bias_diff: 0x%x", val);
+
+	RET_ON(imx636_read_reg(imx636, IMX636_BIAS_DIFF_OFF, 1, &val));
+	dev_info(imx636->dev, "bias_diff_off: 0x%x", val);
+
+	RET_ON(imx636_read_reg(imx636, IMX636_BIAS_REFR, 1, &val));
+	dev_info(imx636->dev, "bias_refr: 0x%x", val);
 	return 0;
 }
+
 #ifdef CONFIG_VIDEO_ADV_DEBUG
 static int imx636_g_register(struct v4l2_subdev *sd, struct v4l2_dbg_register *reg)
 {

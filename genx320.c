@@ -761,12 +761,18 @@ static int genx320_log_status(struct v4l2_subdev *sd)
 	struct device *dev = genx320->pcw.dev;
 	struct mipi_config *mipi = &genx320->pcw.controls.mipi;
 
-	if (mipi->stats_en == false) {
-		dev_info(dev, "MIPI_CSI stats not enabled");
+	if (!genx320->pcw.initialized) {
+		dev_info(dev, "Cannot report status. Sensor is powered down");
 		return 0;
 	}
 
 	dev_info(dev, "******* MIPI_CSI STATUS ********");
+
+	if (mipi->stats_en == false) {
+		dev_info(dev, "MIPI_CSI stats not enabled");
+		goto log_bias_status;
+	}
+
 	RET_ON(genx320_read(genx320, mipi_csi_stat_frame_cnt_address, &val));
 	dev_info(dev, "Frame Count: %u", val);
 
@@ -784,27 +790,30 @@ static int genx320_log_status(struct v4l2_subdev *sd)
 
 	RET_ON(genx320_read(genx320, mipi_csi_stat_frame_period_address, &val));
 	dev_info(dev, "Frame Period: %u", val);
-	
+
+log_bias_status:
 	dev_info(dev, "******* BIAS STATUS ********");
+
 	RET_ON(genx320_read(genx320, bias0_fo_address, &val));
 	dev_info(dev, "bias_fo: 0x%x", val);
-	
+
 	RET_ON(genx320_read(genx320, bias0_hpf_address, &val));
 	dev_info(dev, "bias_hpf: 0x%x", val);
-	
+
 	RET_ON(genx320_read(genx320, bias0_diff_on_address, &val));
 	dev_info(dev, "bias_diff_on: 0x%x", val);
-	
+
 	RET_ON(genx320_read(genx320, bias0_diff_address, &val));
 	dev_info(dev, "bias_diff: 0x%x", val);
-	
+
 	RET_ON(genx320_read(genx320, bias0_diff_off_address, &val));
 	dev_info(dev, "bias_diff_off: 0x%x", val);
-	
+
 	RET_ON(genx320_read(genx320, bias0_refr_address, &val));
 	dev_info(dev, "bias_refr: 0x%x", val);
 	return 0;
 }
+
 #ifdef CONFIG_VIDEO_ADV_DEBUG
 static int genx320_g_register(struct v4l2_subdev *sd, struct v4l2_dbg_register *reg)
 {
