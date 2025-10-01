@@ -109,10 +109,11 @@ static int genx320_read(struct genx320 *genx320, u32 reg, u32 *val)
 
 	ret = i2c_transfer(client->adapter, xfer, 2);
 	if (ret != 2) {
-		dev_warn(genx320->pcw.dev, "read ret %d", ret);
+		dev_warn(genx320->pcw.dev, "register read ret %d", ret);
 		ret = (ret < 0) ? ret : -EIO;
 	} else {
 		*val = be32_to_cpu(*val);
+		dev_dbg(genx320->pcw.dev, "register read  0x%08X: 0x%08X", reg, *val);
 		ret = 0;
 	}
 
@@ -154,8 +155,9 @@ static int genx320_write(struct genx320 *genx320, u32 reg, const u32 val)
 	ret = i2c_transfer(client->adapter, &xfer, 1);
 	if (ret > 0) {
 		ret = 0;
+		dev_dbg(genx320->pcw.dev, "register write 0x%08X: 0x%08X", reg, val);
 	} else {
-		dev_warn(genx320->pcw.dev, "write ret %d", ret);
+		dev_warn(genx320->pcw.dev, "register write ret %d", ret);
 		ret = (ret < 0) ? ret : -EIO;
 	}
 
